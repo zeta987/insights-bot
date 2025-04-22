@@ -272,7 +272,7 @@ func (c *OpenAIClient) SummarizeAny(ctx context.Context, content string) (*opena
 
 	sb := new(strings.Builder)
 
-	err := AnySummarizationPrompt.Execute(sb, AnySummarizationInputs{
+	err := AnySummarizationUserPrompt.Execute(sb, AnySummarizationInputs{
 		Content: content,
 	})
 	if err != nil {
@@ -286,6 +286,10 @@ func (c *OpenAIClient) SummarizeAny(ctx context.Context, content string) (*opena
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role:    openai.ChatMessageRoleSystem,
+					Content: AnySummarizationSystemPrompt,
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
 					Content: sb.String(),
 				},
 			},
@@ -324,7 +328,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 
 	sb := new(strings.Builder)
 
-	err := ChatHistorySummarizationPrompt.Execute(
+	err := ChatHistorySummarizationUserPrompt.Execute(
 		sb,
 		NewChatHistorySummarizationPromptInputs(
 			llmFriendlyChatHistories,
@@ -339,10 +343,16 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		ctx,
 		openai.ChatCompletionRequest{
 			Model: c.modelName,
-			Messages: []openai.ChatCompletionMessage{{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: sb.String(),
-			}},
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: ChatHistorySummarizationSystemPrompt,
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: sb.String(),
+				},
+			},
 		},
 	)
 	if err != nil {

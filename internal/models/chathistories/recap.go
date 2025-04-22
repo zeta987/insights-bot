@@ -23,6 +23,7 @@ import (
 type RecapOutputTemplateInputs struct {
 	ChatID string
 	Recap  *openai.ChatHistorySummarizationOutputs
+	Model  string
 }
 
 func formatChatID(chatID int64) string {
@@ -230,6 +231,7 @@ func (m *Model) renderRecapTemplates(chatID int64, chatType telegram.ChatType, s
 			err := RecapOutputTemplate.Execute(sb, RecapOutputTemplateInputs{
 				ChatID: formatChatID(chatID),
 				Recap:  r,
+				Model:  m.openAI.GetModelName(),
 			})
 			if err != nil {
 				return make([]string, 0), err
@@ -240,6 +242,7 @@ func (m *Model) renderRecapTemplates(chatID int64, chatType telegram.ChatType, s
 			err := RecapWithoutLinksOutputTemplate.Execute(sb, RecapOutputTemplateInputs{
 				ChatID: formatChatID(chatID),
 				Recap:  r,
+				Model:  m.openAI.GetModelName(),
 			})
 			if err != nil {
 				return make([]string, 0), err

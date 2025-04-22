@@ -69,3 +69,6 @@ temp/
 
 # Local pgSQL db
 .postgres/
+
+# Cursor IDE
+.cursor/

@@ -474,3 +474,7 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 
 	return saved.ID, ss, nil
 }
+
+func (m *Model) GetOpenAIModelName() string {
+	return m.openAI.GetModelName()
+}
