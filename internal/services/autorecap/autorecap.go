@@ -56,6 +56,11 @@ type AutoRecapService struct {
 	Config    *configsPkg.Config
 }
 
+type targetChat struct {
+	chatID              int64
+	isPrivateSubscriber bool
+}
+
 func NewAutoRecapService() func(NewAutoRecapParams) (*AutoRecapService, error) {
 	return func(params NewAutoRecapParams) (*AutoRecapService, error) {
 		service := &AutoRecapService{
@@ -193,45 +198,45 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 			zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
 			zap.Error(err),
 		)
-
 		return
 	}
 
 	chatType := telegram.ChatType(chat.Type)
+	hours := 6 // 預設為6小時
 
-	mAutoRecapRatesPerDayHours := map[int]int{
-		4: 6,
-		3: 8,
-		2: 12,
-	}
-
-	hours, ok := mAutoRecapRatesPerDayHours[options.AutoRecapRatesPerDay]
-	if !ok {
+	// 根據每日回顧次數設定小時間隔
+	switch options.AutoRecapRatesPerDay {
+	case 2:
+		hours = 12
+	case 3:
+		hours = 8
+	case 4:
 		hours = 6
 	}
 
-	mFindChatHistoriesHoursBefore := map[int]func(chatID int64) ([]*ent.ChatHistories, error){
-		6:  m.chathistories.FindLast6HourChatHistories,
-		8:  m.chathistories.FindLast8HourChatHistories,
-		12: m.chathistories.FindLast12HourChatHistories,
+	// 獲取聊天歷史
+	var histories []*ent.ChatHistories
+	var findErr error
+
+	switch hours {
+	case 6:
+		histories, findErr = m.chathistories.FindLast6HourChatHistories(chatID)
+	case 8:
+		histories, findErr = m.chathistories.FindLast8HourChatHistories(chatID)
+	case 12:
+		histories, findErr = m.chathistories.FindLast12HourChatHistories(chatID)
 	}
 
-	findChatHistories, ok := mFindChatHistoriesHoursBefore[hours]
-	if !ok {
-		findChatHistories = m.chathistories.FindLast6HourChatHistories
-	}
-
-	histories, err := findChatHistories(chatID)
-	if err != nil {
+	if findErr != nil {
 		m.logger.Error(fmt.Sprintf("failed to find last %d hour chat histories", hours),
 			zap.Int64("chat_id", chatID),
 			zap.String("module", "autorecap"),
 			zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
-			zap.Error(err),
+			zap.Error(findErr),
 		)
-
 		return
 	}
+
 	if len(histories) <= 5 {
 		m.logger.Warn("no enough chat histories")
 		return
@@ -239,6 +244,7 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 
 	chatTitle := histories[len(histories)-1].ChatTitle
 
+	// 生成摘要
 	logID, summarizations, err := m.chathistories.SummarizeChatHistories(chatID, chatType, histories)
 	if err != nil {
 		m.logger.Error(fmt.Sprintf("failed to summarize last %d hour chat histories", hours),
@@ -247,10 +253,10 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 			zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
 			zap.Error(err),
 		)
-
 		return
 	}
 
+	// 獲取反饋統計
 	counts, err := m.chathistories.FindFeedbackRecapsReactionCountsForChatIDAndLogID(chatID, logID)
 	if err != nil {
 		m.logger.Error("failed to find feedback recaps votes for chat",
@@ -259,10 +265,10 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 			zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
 			zap.Error(err),
 		)
-
 		return
 	}
 
+	// 創建投票按鈕
 	inlineKeyboardMarkup, err := m.chathistories.NewVoteRecapInlineKeyboardMarkup(m.botService.Bot(), chatID, logID, counts.UpVotes, counts.DownVotes, counts.Lmao)
 	if err != nil {
 		m.logger.Error("failed to create vote recap inline keyboard markup",
@@ -272,10 +278,10 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 			zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
 			zap.Error(err),
 		)
-
 		return
 	}
 
+	// 過濾空摘要
 	summarizations = lo.Filter(summarizations, func(item string, _ int) bool { return item != "" })
 	if len(summarizations) == 0 {
 		m.logger.Warn("summarization is empty",
@@ -283,26 +289,126 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 			zap.String("module", "autorecap"),
 			zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
 		)
-
 		return
 	}
 
+	// 處理 Markdown 標題
 	for i, s := range summarizations {
 		summarizations[i] = tgbot.ReplaceMarkdownTitlesToTelegramBoldElement(s)
 	}
 
-	summarizationBatches := tgbot.SplitMessagesAgainstLengthLimitIntoMessageGroups(summarizations)
+	// 合併所有摘要
+	rawSummaryAll := strings.Join(summarizations, "\n\n")
+	modelName := m.chathistories.GetOpenAIModelName()
 
-	limiter := ratelimit.New(5)
+	// 生成銳評式濃縮總結
+	condensedSummary, err := m.chathistories.GenSarcasticCondensed(chatID, histories)
+	if err != nil || strings.TrimSpace(condensedSummary) == "" {
+		m.logger.Warn("failed to generate sarcastic condensed summary, using fallback",
+			zap.Error(err),
+			zap.Int64("chat_id", chatID),
+		)
 
-	type targetChat struct {
-		chatID              int64
-		isPrivateSubscriber bool
+		if len(summarizations) > 0 {
+			firstSummary := summarizations[0]
+			if len(firstSummary) > 50 {
+				condensedSummary = firstSummary[:50] + "..."
+			} else {
+				condensedSummary = firstSummary
+			}
+		} else {
+			condensedSummary = fmt.Sprintf("過去 %d 小時的群組聊天回顧", hours)
+		}
+	} else {
+		condensedSummary = strings.TrimSpace(condensedSummary)
 	}
 
+	// 準備 Telegraph 文章內容
+	timestamp := time.Now().Format("2006/01/02 15:04:05")
+	pageTitle := fmt.Sprintf("【群組 %s】自動 %d 小時總結", tgbot.EscapeHTMLSymbols(chatTitle), hours)
+
+	htmlSummary := fmt.Sprintf("<p><small>統計時間範圍：於 %s 發起的過去 %d 小時</small></p><hr>", timestamp, hours)
+	paragraphsAll := strings.Split(rawSummaryAll, "\n\n")
+	for _, p := range paragraphsAll {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		if strings.HasPrefix(p, "##") {
+			titleText := strings.TrimSpace(strings.TrimPrefix(p, "##"))
+			htmlSummary += "<h2>" + titleText + "</h2>"
+			continue
+		}
+
+		p = strings.ReplaceAll(p, "*", "<b>")
+		p = strings.ReplaceAll(p, "*", "</b>")
+		p = strings.ReplaceAll(p, "_", "<i>")
+		p = strings.ReplaceAll(p, "_", "</i>")
+
+		htmlSummary += "<p>" + p + "</p>"
+	}
+
+	htmlSummary += "<hr><p><em>由 " + modelName + " 生成</em></p>"
+
+	// 建立 Telegraph 文章
+	var telegraphURL string
+	var telegraphURLs []string
+	if len(htmlSummary) > 60*1024 {
+		telegraphURLs, err = m.telegraph.CreatePageSeries(context.Background(), pageTitle, htmlSummary)
+		if err != nil {
+			m.logger.Error("failed to create telegraph page series for auto recap",
+				zap.Error(err),
+				zap.Int64("chat_id", chatID),
+				zap.String("title", pageTitle),
+			)
+			return
+		}
+		if len(telegraphURLs) > 0 {
+			telegraphURL = telegraphURLs[0]
+		}
+	} else {
+		telegraphURL, err = m.telegraph.CreatePage(context.Background(), pageTitle, htmlSummary)
+		if err != nil {
+			m.logger.Error("failed to create telegraph page for auto recap",
+				zap.Error(err),
+				zap.Int64("chat_id", chatID),
+				zap.String("title", pageTitle),
+			)
+			return
+		}
+		telegraphURLs = []string{telegraphURL}
+	}
+
+	if telegraphURL == "" {
+		m.logger.Error("telegraph url is empty, aborting auto recap sending", zap.Int64("chat_id", chatID))
+		return
+	}
+
+	// 準備多頁提醒資訊
+	multiPageInfo := ""
+	if len(telegraphURLs) > 1 {
+		multiPageInfo = "\n\n<b>注意：</b>由於內容較長，已分為 " + strconv.Itoa(len(telegraphURLs)) + " 個頁面："
+		for i, url := range telegraphURLs {
+			multiPageInfo += fmt.Sprintf("\n- <a href=\"%s\">第 %d 部分</a>", url, i+1)
+		}
+	}
+
+	// 準備 Telegram 訊息內容
+	content := fmt.Sprintf(
+		"📝 <b>自動聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap #recap_auto\n🤖️ 由 %s 生成",
+		telegraphURL,
+		tgbot.EscapeHTMLSymbols(pageTitle),
+		multiPageInfo,
+		condensedSummary,
+		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由于群组不是超级群组（supergroup），因此消息链接引用暂时被禁用了，如果希望使用该功能，请通过短时间内将群组开放为公共群组并还原回私有群组，或通过其他操作将本群组升级为超级群组后，该功能方可恢复正常运作。\n\n", ""),
+		modelName,
+	)
+
+	// 發送訊息
+	limiter := ratelimit.New(5) // 限制每秒最多發送5條訊息
 	targetChats := make([]targetChat, 0)
 
-	if options == nil || tgchat.AutoRecapSendMode(options.AutoRecapSendMode) == tgchat.AutoRecapSendModePublicly {
+	// 根據發送模式決定目標聊天
+	if tgchat.AutoRecapSendMode(options.AutoRecapSendMode) == tgchat.AutoRecapSendModePublicly {
 		targetChats = append(targetChats, targetChat{
 			chatID:              chatID,
 			isPrivateSubscriber: false,
@@ -310,256 +416,56 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 	}
 
 	for _, subscriber := range subscribers {
-		member, err := m.botService.GetChatMember(tgbotapi.GetChatMemberConfig{
-			ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
-				ChatID: chatID,
-				UserID: subscriber.UserID,
-			},
-		})
-		if err != nil {
-			m.logger.Error("failed to get chat member", zap.Error(err), zap.Int64("chat_id", chatID))
-			continue
-		}
-		if !lo.Contains([]telegram.MemberStatus{
-			telegram.MemberStatusAdministrator,
-			telegram.MemberStatusCreator,
-			telegram.MemberStatusMember,
-			telegram.MemberStatusRestricted,
-		}, telegram.MemberStatus(member.Status)) {
-			m.logger.Warn("subscriber is not a member, auto unsubscribing...",
-				zap.String("status", member.Status),
-				zap.Int64("chat_id", chatID),
-				zap.Int64("user_id", subscriber.UserID),
-				zap.String("module", "autorecap"),
-				zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
-			)
-
-			_, _, err := lo.AttemptWithDelay(1000, time.Minute, func(iter int, _ time.Duration) error {
-				err := m.tgchats.UnsubscribeToAutoRecaps(chatID, subscriber.UserID)
-				if err != nil {
-					m.logger.Error("failed to auto unsubscribe to auto recaps",
-						zap.Error(err),
-						zap.String("status", member.Status),
-						zap.Int64("chat_id", chatID),
-						zap.Int64("user_id", subscriber.UserID),
-						zap.Int("iter", iter),
-						zap.Int("max_iter", 100),
-						zap.String("module", "autorecap"),
-						zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
-					)
-
-					return err
-				}
-
-				return nil
-			})
-			if err != nil {
-				m.logger.Error("failed to unsubscribe to auto recaps",
-					zap.Int64("chat_id", chatID),
-					zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
-					zap.Error(err),
-				)
-			}
-
-			msg := tgbotapi.NewMessage(subscriber.UserID, fmt.Sprintf("由于您已不再是 <b>%s</b> 的成员，因此已自动帮您取消了您所订阅的聊天记录回顾。", tgbot.EscapeHTMLSymbols(chatTitle)))
-			msg.ParseMode = tgbotapi.ModeHTML
-
-			_, err = m.botService.Send(msg)
-			if err != nil {
-				m.logger.Error("failed to send the auto un-subscription message",
-					zap.Int64("user_id", subscriber.UserID),
-					zap.Int64("chat_id", chatID),
-					zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
-					zap.Error(err),
-				)
-			}
-
-			continue
-		}
-
 		targetChats = append(targetChats, targetChat{
 			chatID:              subscriber.UserID,
 			isPrivateSubscriber: true,
 		})
 	}
 
-	for i, b := range summarizationBatches {
-		rawSummary := strings.Join(b, "\n\n")
-		modelName := m.chathistories.GetOpenAIModelName()
+	// 發送訊息到所有目標聊天
+	for _, targetChat := range targetChats {
+		limiter.Take()
+		m.logger.Info("sending chat histories recap for chat",
+			zap.Int64("summarized_for_chat_id", chatID),
+			zap.Int64("sending_target_chat_id", targetChat.chatID))
 
-		// 生成銳評式濃縮總結
-		condensedSummary, err := m.chathistories.GenSarcasticCondensed(chatID, histories)
-		if err != nil {
-			m.logger.Warn("failed to generate sarcastic condensed summary, using fallback",
-				zap.Error(err),
-				zap.Int64("chat_id", chatID),
-			)
-			// 備用的簡單摘要
-			if len(b) > 0 {
-				firstSummary := b[0]
-				if len(firstSummary) > 50 {
-					condensedSummary = firstSummary[:50] + "..."
-				} else {
-					condensedSummary = firstSummary
-				}
-			} else {
-				condensedSummary = fmt.Sprintf("過去 %d 小時的群組聊天回顧", hours)
-			}
-		} else {
-			// 確保摘要文本乾淨整潔
-			condensedSummary = strings.TrimSpace(condensedSummary)
-		}
+		msg := tgbotapi.NewMessage(targetChat.chatID, "")
+		msg.ParseMode = tgbotapi.ModeHTML
 
-		// 修改Telegraph頁面標題格式
-		// 新格式: "【群組 {群組名}】自動 {小時} 小時總結"
-		timestamp := time.Now().Format("2006/01/02 15:04:05")
-		pageTitle := fmt.Sprintf("【群組 %s】自動 %d 小時總結", tgbot.EscapeHTMLSymbols(chatTitle), hours)
+		if targetChat.isPrivateSubscriber {
+			msg.Text = fmt.Sprintf("您好，这是您订阅的 <b>%s</b> 群组的定时聊天回顾。\n\n%s",
+				tgbot.EscapeHTMLSymbols(chatTitle), content)
 
-		// Convert raw summary to simple HTML for Telegraph
-		// 添加統計時間範圍顯示
-		htmlSummary := fmt.Sprintf("<p><small>統計時間範圍：於 %s 發起的過去 %d 小時</small></p><hr>", timestamp, hours)
-
-		// 處理摘要內容為HTML格式
-		paragraphs := strings.Split(rawSummary, "\n\n")
-		for _, p := range paragraphs {
-			if strings.TrimSpace(p) != "" {
-				// 處理特殊格式 - Markdown風格的標題轉HTML
-				if strings.HasPrefix(p, "##") {
-					titleText := strings.TrimPrefix(p, "##")
-					titleText = strings.TrimSpace(titleText)
-					htmlSummary += "<h2>" + titleText + "</h2>"
-					continue
-				}
-
-				// 處理Markdown風格的粗體和斜體
-				p = strings.ReplaceAll(p, "*", "<b>")
-				p = strings.ReplaceAll(p, "*", "</b>")
-				p = strings.ReplaceAll(p, "_", "<i>")
-				p = strings.ReplaceAll(p, "_", "</i>")
-
-				htmlSummary += "<p>" + p + "</p>"
-			}
-		}
-
-		// 新增頁腳
-		htmlSummary += "<hr><p><em>由 " + modelName + " 生成</em></p>"
-
-		// 創建 Telegraph 頁面，支持長內容分頁
-		var telegraphURL string
-		var telegraphURLs []string
-
-		// 檢測是否需要分頁
-		if len(htmlSummary) > 60*1024 { // 使用60KB作為安全邊界
-			// 使用多頁方法
-			telegraphURLs, err = m.telegraph.CreatePageSeries(context.Background(), pageTitle, htmlSummary)
+			inlineKeyboardMarkup, err := m.chathistories.NewVoteRecapWithUnsubscribeInlineKeyboardMarkup(
+				m.botService.Bot(), chatID, chatTitle, targetChat.chatID, logID,
+				counts.UpVotes, counts.DownVotes, counts.Lmao)
 			if err != nil {
-				m.logger.Error("failed to create telegraph page series for auto recap",
-					zap.Error(err),
-					zap.Int64("chat_id", chatID),
-					zap.String("title", pageTitle),
-				)
-				// 繼續下一批次
-				continue
-			}
-
-			// 使用第一個URL作為主URL
-			if len(telegraphURLs) > 0 {
-				telegraphURL = telegraphURLs[0]
-			} else {
-				// 繼續下一批次
-				continue
-			}
-		} else {
-			// 使用單頁方法
-			telegraphURL, err = m.telegraph.CreatePage(context.Background(), pageTitle, htmlSummary)
-			if err != nil {
-				m.logger.Error("failed to create telegraph page for auto recap",
-					zap.Error(err),
-					zap.Int64("chat_id", chatID),
-					zap.String("title", pageTitle),
-				)
-				// Fallback or error handling: maybe send raw text or an error message?
-				// For now, let's log the error and continue without sending this batch.
-				continue
-			}
-			telegraphURLs = []string{telegraphURL}
-		}
-
-		var content string
-
-		// 添加多頁信息（如果有多頁）
-		multiPageInfo := ""
-		if len(telegraphURLs) > 1 {
-			multiPageInfo = "\n\n<b>注意：</b>由於內容較長，已分為 " + strconv.Itoa(len(telegraphURLs)) + " 個頁面："
-			for i, url := range telegraphURLs {
-				multiPageInfo += fmt.Sprintf("\n- <a href=\"%s\">第 %d 部分</a>", url, i+1)
-			}
-		}
-
-		// 修改Telegram回顧消息格式
-		baseContent := fmt.Sprintf("📝 <b>自動聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap #recap_auto\n🤖️ 由 %s 生成",
-			telegraphURL,
-			tgbot.EscapeHTMLSymbols(pageTitle), // Use page title as link text
-			multiPageInfo,
-			condensedSummary, // 不對摘要內容轉義，保持原文
-			lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由于群组不是超级群组（supergroup），因此消息链接引用暂时被禁用了，如果希望使用该功能，请通过短时间内将群组开放为公共群组并还原回私有群组，或通过其他操作将本群组升级为超级群组后，该功能方可恢复正常运作。\n\n", ""),
-			modelName,
-		)
-
-		if len(summarizationBatches) > 1 {
-			content = fmt.Sprintf("%s (%d/%d)", baseContent, i+1, len(summarizationBatches))
-		} else {
-			content = baseContent
-		}
-
-		for _, targetChat := range targetChats {
-			limiter.Take()
-			m.logger.Info("sending chat histories recap for chat", zap.Int64("summarized_for_chat_id", chatID), zap.Int64("sending_target_chat_id", targetChat.chatID))
-
-			msg := tgbotapi.NewMessage(targetChat.chatID, "")
-			msg.ParseMode = tgbotapi.ModeHTML
-
-			if targetChat.isPrivateSubscriber {
-				msg.Text = fmt.Sprintf("您好，这是您订阅的 <b>%s</b> 群组的定时聊天回顾。\n\n%s", tgbot.EscapeHTMLSymbols(chatTitle), content)
-
-				inlineKeyboardMarkup, err := m.chathistories.NewVoteRecapWithUnsubscribeInlineKeyboardMarkup(m.botService.Bot(), chatID, chatTitle, targetChat.chatID, logID, counts.UpVotes, counts.DownVotes, counts.Lmao)
-				if err != nil {
-					m.logger.Error("failed to assign callback query data",
-						zap.Int64("chat_id", chatID),
-						zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
-						zap.Error(err),
-					)
-
-					continue
-				}
-
-				msg.ReplyMarkup = inlineKeyboardMarkup
-			} else {
-				msg.Text = content
-				msg.ReplyMarkup = inlineKeyboardMarkup
-			}
-
-			sentMsg, err := m.botService.Send(msg)
-			if err != nil {
-				m.logger.Error("failed to send chat histories recap",
+				m.logger.Error("failed to assign callback query data",
 					zap.Int64("chat_id", chatID),
 					zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
 					zap.Error(err),
 				)
+				continue
 			}
 
-			// Check whether the first message of the batch needs to be pinned, if not, skip the pinning process
-			if i != 0 || !options.PinAutoRecapMessage {
-				err = m.chathistories.SaveOneTelegramSentMessage(&sentMsg, false)
-				if err != nil {
-					m.logger.Error("failed to save one telegram sent message",
-						zap.Int64("chat_id", chatID),
-						zap.Error(err))
-				}
+			msg.ReplyMarkup = inlineKeyboardMarkup
+		} else {
+			msg.Text = content
+			msg.ReplyMarkup = inlineKeyboardMarkup
+		}
 
-				continue // Use continue instead of return, so that the next message can be processed
-			}
+		sentMsg, err := m.botService.Send(msg)
+		if err != nil {
+			m.logger.Error("failed to send chat histories recap",
+				zap.Int64("chat_id", chatID),
+				zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
+				zap.Error(err),
+			)
+			continue
+		}
 
+		// 處理訊息釘選
+		if options.PinAutoRecapMessage && !targetChat.isPrivateSubscriber {
 			may := fo.NewMay0().Use(func(err error, messageArgs ...any) {
 				if len(messageArgs) == 0 {
 					m.logger.Error(err.Error())
@@ -586,19 +492,46 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 				m.logger.Error(prefix, fields...)
 			})
 
-			// Unpin the last pinned message
+			// 取消釘選上一條訊息
 			lastPinnedMessage, err := m.chathistories.FindLastTelegramPinnedMessage(chatID)
 			if err != nil {
 				m.logger.Error("failed to find last pinned message",
 					zap.Int64("chat_id", chatID),
 					zap.Error(err),
 				)
+			} else {
+				may.Invoke(
+					m.botService.UnpinChatMessage(tgbot.NewUnpinChatMessageConfig(chatID, lastPinnedMessage.MessageID)),
+					"failed to unpin chat message",
+					zap.Int64("chat_id", chatID),
+					zap.Int("message_id", lastPinnedMessage.MessageID),
+				)
+				may.Invoke(
+					m.chathistories.UpdatePinnedMessage(lastPinnedMessage.ChatID, lastPinnedMessage.MessageID, false),
+					"failed to save one telegram sent message",
+					zap.Int64("chat_id", lastPinnedMessage.ChatID),
+					zap.Int("message_id", lastPinnedMessage.MessageID),
+				)
 			}
 
-			may.Invoke(m.botService.UnpinChatMessage(tgbot.NewUnpinChatMessageConfig(chatID, lastPinnedMessage.MessageID)), "failed to unpin chat message", zap.Int64("chat_id", chatID), zap.Int("message_id", lastPinnedMessage.MessageID))
-			may.Invoke(m.chathistories.UpdatePinnedMessage(lastPinnedMessage.ChatID, lastPinnedMessage.MessageID, false), "failed to save one telegram sent message", zap.Int64("chat_id", lastPinnedMessage.ChatID), zap.Int("message_id", lastPinnedMessage.MessageID))
-			may.Invoke(m.botService.PinChatMessage(tgbot.NewPinChatMessageConfig(chatID, sentMsg.MessageID)), "failed to pin chat message", zap.Int64("chat_id", chatID), zap.Int("message_id", sentMsg.MessageID))
-			may.Invoke(m.chathistories.SaveOneTelegramSentMessage(&sentMsg, true), "failed to save one telegram sent message")
+			// 釘選新訊息
+			may.Invoke(
+				m.botService.PinChatMessage(tgbot.NewPinChatMessageConfig(chatID, sentMsg.MessageID)),
+				"failed to pin chat message",
+				zap.Int64("chat_id", chatID),
+				zap.Int("message_id", sentMsg.MessageID),
+			)
+			may.Invoke(
+				m.chathistories.SaveOneTelegramSentMessage(&sentMsg, true),
+				"failed to save one telegram sent message",
+			)
+		} else {
+			err = m.chathistories.SaveOneTelegramSentMessage(&sentMsg, false)
+			if err != nil {
+				m.logger.Error("failed to save one telegram sent message",
+					zap.Int64("chat_id", chatID),
+					zap.Error(err))
+			}
 		}
 	}
 }
