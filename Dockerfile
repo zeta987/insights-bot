@@ -31,6 +31,4 @@ COPY --from=builder /app/insights-bot/locales /etc/insights-bot/locales
 ENV LOG_FILE_PATH /var/log/insights-bot/insights-bot.log
 ENV LOCALES_DIR /etc/insights-bot/locales
 
-EXPOSE 7069
-
 CMD [ "/usr/local/bin/insights-bot" ]
