@@ -15,6 +15,7 @@ type SchemaConfig struct {
 	MetricOpenAIChatCompletionTokenUsage string // MetricOpenAIChatCompletionTokenUsage table.
 	SentMessages                         string // SentMessages table.
 	SlackOAuthCredentials                string // SlackOAuthCredentials table.
+	TelegramChat                         string // TelegramChat table.
 	TelegramChatAutoRecapsSubscribers    string // TelegramChatAutoRecapsSubscribers table.
 	TelegramChatFeatureFlags             string // TelegramChatFeatureFlags table.
 	TelegramChatRecapsOptions            string // TelegramChatRecapsOptions table.

@@ -107,7 +107,6 @@ func (h *CommandHandler) handleRecapForwardedCommand(c *tgbot.Context) (tgbot.Re
 		}
 
 		msg := tgbotapi.NewMessage(c.Update.Message.Chat.ID, content)
-		msg.ParseMode = tgbotapi.ModeHTML
 		msg.ReplyToMessageID = c.Update.Message.MessageID
 
 		h.logger.Info("sending chat histories recap for chat",
@@ -119,7 +118,6 @@ func (h *CommandHandler) handleRecapForwardedCommand(c *tgbot.Context) (tgbot.Re
 	}
 
 	msg := tgbotapi.NewMessage(c.Update.Message.Chat.ID, "总结完成，如果你觉得不满意，可以再次发送 /recap_forwarded 重新生成哦！如果觉得满意，并且希望进行其他的总结操作，可以在开始前发送 /cancel 来清空当前已经接收到的消息，如果不进行操作，缓存的消息将会在 2 小时后被自动清理。")
-	msg.ParseMode = tgbotapi.ModeHTML
 	msg.ReplyToMessageID = c.Update.Message.MessageID
 
 	return nil, nil

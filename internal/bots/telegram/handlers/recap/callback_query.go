@@ -1,10 +1,12 @@
 package recap
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/samber/lo"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/nekomeowww/insights-bot/internal/models/chathistories"
 	"github.com/nekomeowww/insights-bot/internal/models/tgchats"
+	TelegraphService "github.com/nekomeowww/insights-bot/internal/services/telegraph"
 	"github.com/nekomeowww/insights-bot/pkg/bots/tgbot"
 	"github.com/nekomeowww/insights-bot/pkg/logger"
 	"github.com/nekomeowww/insights-bot/pkg/types/bot/handlers/recap"
@@ -26,12 +29,14 @@ type NewCallbackQueryHandlerParams struct {
 	Logger        *logger.Logger
 	ChatHistories *chathistories.Model
 	TgChats       *tgchats.Model
+	Telegraph     *TelegraphService.Service // Inject Telegraph Service
 }
 
 type CallbackQueryHandler struct {
 	logger        *logger.Logger
 	chatHistories *chathistories.Model
 	tgchats       *tgchats.Model
+	telegraph     *TelegraphService.Service // Store Telegraph service
 }
 
 func NewCallbackQueryHandler() func(NewCallbackQueryHandlerParams) *CallbackQueryHandler {
@@ -40,6 +45,7 @@ func NewCallbackQueryHandler() func(NewCallbackQueryHandlerParams) *CallbackQuer
 			logger:        param.Logger,
 			chatHistories: param.ChatHistories,
 			tgchats:       param.TgChats,
+			telegraph:     param.Telegraph, // Initialize telegraph field
 		}
 	}
 }
@@ -636,4 +642,264 @@ func (h *CallbackQueryHandler) handleCallbackQueryPin(c *tgbot.Context) (tgbot.R
 		),
 		markup,
 	), nil
+}
+
+// handleCallbackQuerySelectHours handles the callback query for selecting hours and generates a Telegraph page with the summary
+func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) (tgbot.Response, error) {
+	messageID := c.Update.CallbackQuery.Message.MessageID
+	replyToMessage := c.Update.CallbackQuery.Message.ReplyToMessage
+
+	var data recap.SelectHourCallbackQueryData
+	err := c.BindFromCallbackQueryData(&data)
+	if err != nil {
+		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
+	}
+	if !lo.Contains(RecapSelectHourAvailable, data.Hour) {
+		return nil, tgbot.NewExceptionError(fmt.Errorf("invalid hour: %d", data.Hour)).WithReply(replyToMessage)
+	}
+
+	var inProgressText string
+	switch data.RecapMode {
+	case tgchat.AutoRecapSendModePublicly:
+		inProgressText = fmt.Sprintf("正在為過去 %d 個小時的聊天記錄生成回顧，請稍等...", data.Hour)
+	case tgchat.AutoRecapSendModeOnlyPrivateSubscriptions:
+		inProgressText = fmt.Sprintf("正在為 <b>%s</b> 過去 %d 個小時的聊天記錄生成回顧，請稍等...", tgbot.EscapeHTMLSymbols(data.ChatTitle), data.Hour)
+	default:
+		inProgressText = fmt.Sprintf("正在為過去 %d 個小時的聊天記錄生成回顧，請稍等...", data.Hour)
+	}
+
+	editConfig := tgbotapi.NewEditMessageTextAndMarkup(
+		c.Update.CallbackQuery.Message.Chat.ID,
+		messageID,
+		inProgressText,
+		tgbotapi.NewInlineKeyboardMarkup([]tgbotapi.InlineKeyboardButton{}),
+	)
+	editConfig.ParseMode = tgbotapi.ModeHTML
+
+	_, err = c.Bot.Request(editConfig)
+	if err != nil {
+		h.logger.Error("failed to edit message", zap.Error(err))
+	}
+
+	// Convert hour (int64) to time.Duration
+	hourDuration := time.Duration(data.Hour) * time.Hour
+	histories, err := h.chatHistories.FindChatHistoriesByTimeBefore(data.ChatID, hourDuration)
+	if err != nil {
+		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
+	}
+	if len(histories) <= 5 {
+		var errMessage string
+		switch data.RecapMode {
+		case tgchat.AutoRecapSendModePublicly:
+			errMessage = fmt.Sprintf("最近 %d 小時內暫時沒有超過 5 條的聊天記錄可以生成聊天回顧哦，要再多聊點之後再試試嗎？", data.Hour)
+		case tgchat.AutoRecapSendModeOnlyPrivateSubscriptions:
+			errMessage = fmt.Sprintf("最近 %d 小時內暫時沒有超過 5 條的聊天記錄可以生成聊天回顧哦，要再等待群內成員多聊點之後再試試嗎？", data.Hour)
+		default:
+			errMessage = fmt.Sprintf("最近 %d 小時內暫時沒有超過 5 條的聊天記錄可以生成聊天回顧哦，要再多聊點之後再試試嗎？", data.Hour)
+		}
+		return nil, tgbot.NewMessageError(errMessage).WithReply(replyToMessage)
+	}
+
+	chatType := telegram.ChatType(c.Update.CallbackQuery.Message.Chat.Type)
+
+	logID, summarizations, err := h.chatHistories.SummarizeChatHistories(data.ChatID, chatType, histories)
+	if err != nil {
+		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
+	}
+
+	summarizations = lo.Filter(summarizations, func(item string, _ int) bool { return item != "" })
+	if len(summarizations) == 0 {
+		return nil, tgbot.NewMessageError("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
+	}
+
+	// Find counts for voting buttons BEFORE sending the message
+	counts, err := h.chatHistories.FindFeedbackRecapsReactionCountsForChatIDAndLogID(data.ChatID, logID)
+	if err != nil {
+		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
+	}
+
+	inlineKeyboardMarkup, err := h.chatHistories.NewVoteRecapInlineKeyboardMarkup(c.Bot, data.ChatID, logID, counts.UpVotes, counts.DownVotes, counts.Lmao)
+	if err != nil {
+		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
+	}
+
+	// 修改標題格式
+	// 原始格式: "{群組名} 用戶 {用戶名} 於 {時間} 總結範圍 {小時} 個小時"
+	// 新格式: "【群組 {群組名}】用戶 {用戶名} 發起 {小時} 個小時總結"
+	actorName := tgbot.EscapeHTMLSymbols(c.Update.CallbackQuery.From.FirstName)
+	if c.Update.CallbackQuery.From.LastName != "" {
+		actorName += " " + tgbot.EscapeHTMLSymbols(c.Update.CallbackQuery.From.LastName)
+	}
+	timestamp := time.Now().Format("2006/01/02 15:04:05")
+	groupName := tgbot.EscapeHTMLSymbols(data.ChatTitle)
+	if groupName == "" {
+		groupName = "當前聊天"
+	}
+	// 新格式的頁面標題
+	pageTitle := fmt.Sprintf("【群組 %s】用戶 %s 發起 %d 個小時總結", groupName, actorName, data.Hour)
+
+	// 格式化 HTML 內容（不使用 <article> 以免產生空 tag）
+	var htmlContent strings.Builder
+
+	// 修改統計時間範圍的顯示
+	htmlContent.WriteString(fmt.Sprintf("<p><small>統計時間範圍：於 %s 發起的過去 %d 小時</small></p>", timestamp, data.Hour))
+	htmlContent.WriteString("<hr>")
+
+	// 添加摘要內容
+	for _, summary := range summarizations {
+		// 處理段落格式
+		paragraphs := strings.Split(summary, "\n\n")
+		for _, p := range paragraphs {
+			if strings.TrimSpace(p) != "" {
+				// 處理特殊格式
+				// 將 Markdown 風格的標題轉換為 HTML 標題
+				if strings.HasPrefix(p, "##") {
+					titleText := strings.TrimPrefix(p, "##")
+					titleText = strings.TrimSpace(titleText)
+					htmlContent.WriteString("<h2>" + titleText + "</h2>")
+					continue
+				}
+
+				p = strings.ReplaceAll(p, "*", "<b>") // 將 Markdown 風格的粗體轉換為 HTML
+				p = strings.ReplaceAll(p, "*", "</b>")
+				p = strings.ReplaceAll(p, "_", "<i>") // 將 Markdown 風格的斜體轉換為 HTML
+				p = strings.ReplaceAll(p, "_", "</i>")
+
+				htmlContent.WriteString("<p>" + p + "</p>")
+			}
+		}
+		htmlContent.WriteString("<br/>")
+	}
+
+	// 新增頁腳
+	htmlContent.WriteString("<hr>")
+	htmlContent.WriteString(fmt.Sprintf("<p><em>由 %s 生成</em></p>", h.chatHistories.GetOpenAIModelName()))
+
+	// Create Telegraph page with retry mechanism, support multiple pages if needed
+	var telegraphURL string
+	var telegraphURLs []string
+
+	// 檢測是否需要分頁
+	if len(htmlContent.String()) > 60*1024 { // 使用60KB作為安全邊界
+		// 使用多頁方法
+		telegraphURLs, err = h.telegraph.CreatePageSeries(context.Background(), pageTitle, htmlContent.String())
+		if err != nil {
+			h.logger.Error("failed to create telegraph page series for manual recap",
+				zap.Error(err),
+				zap.Int64("chat_id", data.ChatID),
+				zap.String("title", pageTitle),
+			)
+			return nil, tgbot.NewExceptionError(err).WithMessage("生成 Telegraph 文章失敗，請稍後再試或聯繫管理員。").WithReply(replyToMessage)
+		}
+
+		// 使用第一個URL作為主URL
+		if len(telegraphURLs) > 0 {
+			telegraphURL = telegraphURLs[0]
+		} else {
+			return nil, tgbot.NewExceptionError(fmt.Errorf("empty telegraph URLs")).WithMessage("生成 Telegraph 文章失敗，請稍後再試或聯繫管理員。").WithReply(replyToMessage)
+		}
+	} else {
+		// 使用單頁方法
+		telegraphURL, err = h.telegraph.CreatePage(context.Background(), pageTitle, htmlContent.String())
+		if err != nil {
+			h.logger.Error("failed to create telegraph page for manual recap",
+				zap.Error(err),
+				zap.Int64("chat_id", data.ChatID),
+				zap.String("title", pageTitle),
+			)
+			return nil, tgbot.NewExceptionError(err).WithMessage("生成 Telegraph 文章失敗，請稍後再試或聯繫管理員。").WithReply(replyToMessage)
+		}
+		telegraphURLs = []string{telegraphURL}
+	}
+
+	// 1. 嘗試使用 OpenAI 生成銳評式濃縮摘要
+	condensedSummary, genErr := h.chatHistories.GenSarcasticCondensed(data.ChatID, histories)
+	if genErr != nil || condensedSummary == "" {
+		// 2. Fallback：採用既有簡單算法
+		condensedSummary = "最近討論的主題包括: "
+		if len(summarizations) > 0 {
+			allText := strings.Join(summarizations, " ")
+
+			// 提取關鍵詞
+			words := strings.Fields(allText)
+			wordCount := make(map[string]int)
+			for _, word := range words {
+				if len(word) > 1 {
+					wordCount[word]++
+				}
+			}
+			keyWords := []string{}
+			for word, count := range wordCount {
+				if count > 2 && len(word) > 1 && !strings.Contains("的了是在和與於及", word) {
+					keyWords = append(keyWords, word)
+					if len(keyWords) >= 3 {
+						break
+					}
+				}
+			}
+
+			if len(keyWords) > 0 {
+				condensedSummary = fmt.Sprintf("群組在過去 %d 小時內主要討論了 %s 等主題。", data.Hour, strings.Join(keyWords, "、"))
+			} else {
+				firstSummary := summarizations[0]
+				if len(firstSummary) > 50 {
+					condensedSummary = firstSummary[:50] + "..."
+				} else {
+					condensedSummary = firstSummary
+				}
+			}
+		}
+	} else {
+		// 確保摘要文本乾淨整潔
+		condensedSummary = strings.TrimSpace(condensedSummary)
+	}
+
+	// Send the link to Telegram
+	modelName := h.chatHistories.GetOpenAIModelName()
+
+	// 添加多頁信息（如果有多頁）
+	multiPageInfo := ""
+	if len(telegraphURLs) > 1 {
+		multiPageInfo = "\n\n<b>注意：</b>由於內容較長，已分為 " + strconv.Itoa(len(telegraphURLs)) + " 個頁面："
+		for i, url := range telegraphURLs {
+			multiPageInfo += fmt.Sprintf("\n- <a href=\"%s\">第 %d 部分</a>", url, i+1)
+		}
+	}
+
+	content := fmt.Sprintf("📝 <b>聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap\n🤖️ 由 %s 生成",
+		telegraphURL,
+		tgbot.EscapeHTMLSymbols(pageTitle),
+		multiPageInfo,
+		condensedSummary,
+		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由於群組不是超級群組（supergroup），因此消息鏈接引用暫時被禁用了，如果希望使用該功能，請通過短時間內將群組開放為公共群組並還原回私有群組，或通過其他操作將本群組升級為超級群組後，該功能方可恢復正常運作。\n\n", ""),
+		modelName,
+	)
+
+	msg := tgbotapi.NewMessage(c.Update.CallbackQuery.Message.Chat.ID, content)
+	msg.ParseMode = tgbotapi.ModeHTML
+	msg.ReplyMarkup = inlineKeyboardMarkup // Attach voting buttons
+
+	if replyToMessage != nil {
+		msg.ReplyToMessageID = replyToMessage.MessageID
+	}
+
+	h.logger.Info("sending chat histories recap link for chat",
+		zap.Int64("chat_id", c.Update.CallbackQuery.Message.Chat.ID),
+		zap.String("telegraph_url", telegraphURL),
+	)
+
+	_, sendErr := c.Bot.Send(msg)
+	if sendErr != nil {
+		h.logger.Error("failed to send recap link", zap.Error(sendErr), zap.Int64("chat_id", c.Update.CallbackQuery.Message.Chat.ID))
+		// Don't return error here, try to delete the original message anyway
+	}
+
+	// Delete the "Generating..." message
+	deleteConfig := tgbotapi.NewDeleteMessage(c.Update.CallbackQuery.Message.Chat.ID, messageID)
+	_, delErr := c.Bot.Request(deleteConfig)
+	if delErr != nil {
+		h.logger.Error("failed to delete waiting message", zap.Error(delErr))
+	}
+
+	return nil, nil // Indicate success
 }

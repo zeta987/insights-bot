@@ -8,6 +8,7 @@ require (
 	entgo.io/ent v0.13.1
 	github.com/PuerkitoBio/goquery v1.9.2
 	github.com/alexliesenfeld/health v0.8.0
+	github.com/celestix/telegraph-go/v2 v2.0.4
 	github.com/disgoorg/disgo v0.18.10
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/gin-gonic/gin v1.10.0

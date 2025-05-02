@@ -56,6 +56,18 @@ const (
 	EnvHardLimitSummarizeWebpageRatePerSeconds = "HARD_LIMIT_SMR_WEBPAGE_RATE_PER_SECONDS"
 
 	EnvLocalesDir = "LOCALES_DIR"
+
+	EnvTelegraphAccessToken = "TELEGRAPH_ACCESS_TOKEN"
+	EnvTelegraphApiUrl      = "TELEGRAPH_API_URL"
+	EnvTelegraphTimeoutSec  = "TELEGRAPH_TIMEOUT_SEC"
+
+	// Auto recap testing
+	EnvAutoRecapTestChatID  = "AUTO_RECAP_TEST_CHAT_ID"
+	EnvAutoRecapTestEnabled = "AUTO_RECAP_TEST_ENABLED"
+
+	// Telegraph large content paging test
+	EnvTelegraphPagingTestEnabled = "TELEGRAPH_PAGING_TEST_ENABLED"
+	EnvTelegraphPagingTestFile    = "TELEGRAPH_PAGING_TEST_FILE"
 )
 
 type SectionPineconeIndexes struct {
@@ -115,10 +127,17 @@ type SectionOpenAI struct {
 	ChatHistoriesRecapTokenLimit int64
 }
 
+type SectionTelegraph struct {
+	AccessToken string
+	ApiUrl      string
+	TimeoutSec  int
+}
+
 type Config struct {
 	TimezoneShiftSeconds int64
 	Telegram             SectionTelegram
 	OpenAI               SectionOpenAI
+	Telegraph            SectionTelegraph
 	Pinecone             SectionPinecone
 	CloverDBPath         string
 	DB                   SectionDB
@@ -129,6 +148,14 @@ type Config struct {
 	LogFilePath          string
 	HardLimit            SectionHardLimit
 	LocalesDir           string
+
+	// Auto recap testing
+	AutoRecapTestChatID  int64
+	AutoRecapTestEnabled bool
+
+	// Telegraph paging test switch
+	TelegraphPagingTestEnabled bool
+	TelegraphPagingTestFile    string
 }
 
 func NewConfig() func() (*Config, error) {
@@ -203,6 +230,14 @@ func NewConfig() func() (*Config, error) {
 			log.Printf("%s value %v is greater than token limit, fallbacks to %v", EnvOpenAIAPIChatHistoriesRecapTokenLimit, getEnv(EnvOpenAIAPIChatHistoriesRecapTokenLimit), tokenLimit)
 		}
 
+		telegraphTimeout, telegraphTimeoutErr := strconv.Atoi(getEnv(EnvTelegraphTimeoutSec))
+		if telegraphTimeoutErr != nil || telegraphTimeout <= 0 {
+			telegraphTimeout = 10
+		}
+
+		autoRecapTestChatID, _ := strconv.ParseInt(getEnv(EnvAutoRecapTestChatID), 10, 64)
+		autoRecapTestEnabled := getEnv(EnvAutoRecapTestEnabled) == "true" || getEnv(EnvAutoRecapTestEnabled) == "1"
+
 		return &Config{
 			TimezoneShiftSeconds: lo.Ternary(timezoneShiftSecondsParseErr == nil, lo.Ternary(timezoneShiftSeconds != 0, timezoneShiftSeconds, 0), 0),
 			Telegram: SectionTelegram{
@@ -222,6 +257,11 @@ func NewConfig() func() (*Config, error) {
 				ModelName:                    lo.Ternary(getEnv(EnvOpenAIAPIModelName) == "", goopenai.GPT3Dot5Turbo, getEnv(EnvOpenAIAPIModelName)),
 				TokenLimit:                   lo.Ternary(tokenLimitParseErr == nil, lo.Ternary(tokenLimit != 0, tokenLimit, 4096), 4096),
 				ChatHistoriesRecapTokenLimit: lo.Ternary(chatHistoriesRecapTokenLimitParseErr == nil, lo.Ternary(chatHistoriesRecapTokenLimit != 0, chatHistoriesRecapTokenLimit, 2000), 2000),
+			},
+			Telegraph: SectionTelegraph{
+				AccessToken: getEnv(EnvTelegraphAccessToken),
+				ApiUrl:      lo.Ternary(getEnv(EnvTelegraphApiUrl) == "", "https://api.telegra.ph", getEnv(EnvTelegraphApiUrl)),
+				TimeoutSec:  telegraphTimeout,
 			},
 			Pinecone: SectionPinecone{
 				ProjectName: getEnv(EnvPineconeProjectName),
@@ -254,7 +294,11 @@ func NewConfig() func() (*Config, error) {
 				ManualRecapRatePerSeconds:      manualRecapRatePerSecondsHardLimit,
 				SummarizeWebpageRatePerSeconds: summarizeWebpageRatePerSecondsHardLimit,
 			},
-			LocalesDir: getEnv(EnvLocalesDir),
+			LocalesDir:                 getEnv(EnvLocalesDir),
+			AutoRecapTestChatID:        autoRecapTestChatID,
+			AutoRecapTestEnabled:       autoRecapTestEnabled,
+			TelegraphPagingTestEnabled: getEnv(EnvTelegraphPagingTestEnabled) == "true" || getEnv(EnvTelegraphPagingTestEnabled) == "1",
+			TelegraphPagingTestFile:    getEnv(EnvTelegraphPagingTestFile),
 		}, nil
 	}
 }

@@ -3,6 +3,7 @@ package openai
 //go:generate go run github.com/maxbrunsfeld/counterfeiter/v6 -generate
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/url"
@@ -30,6 +31,7 @@ type Client interface {
 	SummarizeOneChatHistory(ctx context.Context, llmFriendlyChatHistory string) (*openai.ChatCompletionResponse, error)
 	SummarizeWithQuestionsAsSimplifiedChinese(ctx context.Context, title string, by string, content string) (*openai.ChatCompletionResponse, error)
 	TruncateContentBasedOnTokens(textContent string, limits int) string
+	SarcasticCondense(ctx context.Context, chatHistory string) (string, error)
 }
 
 var _ Client = (*OpenAIClient)(nil)
@@ -381,4 +383,63 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 	}
 
 	return &resp, nil
+}
+
+func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string) (string, error) {
+	if chatHistory == "" {
+		return "", nil
+	}
+
+	var userPrompt bytes.Buffer
+	err := SarcasticCondensedUserPrompt.Execute(&userPrompt, SarcasticCondensedSummaryInputs{
+		ChatHistory: chatHistory,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	c.limiter.Take()
+
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: SarcasticCondensedSystemPrompt,
+		},
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: userPrompt.String(),
+		},
+	}
+
+	resp, err := c.client.CreateChatCompletion(
+		ctx,
+		openai.ChatCompletionRequest{
+			Model:       c.modelName,
+			Messages:    messages,
+			Temperature: 0.7, // 稍微提高溫度以增加創意性
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	if len(resp.Choices) == 0 || resp.Choices[0].Message.Content == "" {
+		return "", fmt.Errorf("no content generated")
+	}
+
+	if c.enableMetricRecordForTokens {
+		err = c.ent.MetricOpenAIChatCompletionTokenUsage.
+			Create().
+			SetPromptOperation("Sarcastic Condense").
+			SetPromptTokenUsage(resp.Usage.PromptTokens).
+			SetCompletionTokenUsage(resp.Usage.CompletionTokens).
+			SetTotalTokenUsage(resp.Usage.TotalTokens).
+			SetModelName(c.modelName).
+			Exec(ctx)
+		if err != nil {
+			c.logger.Error("failed to record token usage", zap.Error(err))
+		}
+	}
+
+	return resp.Choices[0].Message.Content, nil
 }

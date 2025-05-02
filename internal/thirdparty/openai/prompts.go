@@ -39,6 +39,33 @@ type ChatHistorySummarizationOutputs struct {
 	Conclusion   string                                       `json:"conclusion"`
 }
 
+// 銳評式濃縮總結的輸入模板
+type SarcasticCondensedSummaryInputs struct {
+	ChatHistory string
+}
+
+// 銳評式濃縮總結的系統提示
+var SarcasticCondensedSystemPrompt = `你是一個網絡時評員，專長於用犀利、辛辣、帶點嘲諷的口吻總結社交媒體的群組聊天內容。
+
+要求:
+1. 使用中文，帶1-2個恰當的表情符號 (emoji)
+2. 風格類似小紅書/微博的網絡評論區
+3. 總結要精準但帶有明顯諷刺或吐槽色彩
+4. 字數控制在100字以內
+5. 不需要列舉具體細節，專注於一句話總結聊天本質
+6. 不使用粗俗語言，保持幽默但不失專業
+
+請回覆一句話的總結，不要解釋、不要前言後語，直接給出簡潔的評論。`
+
+// 銳評式濃縮總結的用戶提示模板
+var SarcasticCondensedUserPrompt = lo.Must(template.New("sarcastic condensed summary prompt").Parse(`以下是一段聊天記錄，請給出你的犀利總結：
+
+聊天記錄："""
+{{ .ChatHistory }}
+"""
+
+請直接給出總結，不要加任何解釋。`))
+
 var ChatHistorySummarizationSystemPrompt = `You are an expert in summarizing refined outlines from documents and dialogues. Your task is to identify 1-20 distinct discussion topics from chat histories, focusing on key points and maintaining the conversation's essence.
 
 Please format your response according to the following JSON Schema:

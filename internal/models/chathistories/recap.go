@@ -15,6 +15,7 @@ import (
 	goopenai "github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 
+	"github.com/nekomeowww/insights-bot/ent"
 	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai"
 	"github.com/nekomeowww/insights-bot/pkg/bots/tgbot"
 	"github.com/nekomeowww/insights-bot/pkg/types/telegram"
@@ -253,4 +254,46 @@ func (m *Model) renderRecapTemplates(chatID int64, chatType telegram.ChatType, s
 	}
 
 	return ss, nil
+}
+
+// GenSarcasticCondensed 生成一個用於聊天歷史的銳評式濃縮總結
+func (m *Model) GenSarcasticCondensed(chatID int64, histories []*ent.ChatHistories) (string, error) {
+	if len(histories) == 0 {
+		return "", fmt.Errorf("no chat histories")
+	}
+
+	// 將歷史訊息轉為文本格式
+	builder := strings.Builder{}
+
+	for i, history := range histories {
+		// 格式化訊息，類似於convertHistoriesToLLMFriendlyChatHistories的邏輯
+		userName := history.FullName
+		if userName == "" {
+			userName = history.Username
+		}
+		if userName == "" {
+			userName = "未知用戶"
+		}
+
+		messageText := history.Text
+		if messageText == "" {
+			// 跳過空內容
+			continue
+		}
+
+		// 添加每條訊息
+		builder.WriteString(fmt.Sprintf("[%d] %s: %s\n", i+1, userName, messageText))
+	}
+
+	// 調用OpenAI生成銳評總結
+	result, err := m.openAI.SarcasticCondense(context.Background(), builder.String())
+	if err != nil {
+		m.logger.Error("failed to generate sarcastic condensed summary",
+			zap.Int64("chat_id", chatID),
+			zap.Error(err),
+		)
+		return "", err
+	}
+
+	return result, nil
 }

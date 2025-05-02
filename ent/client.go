@@ -23,6 +23,7 @@ import (
 	"github.com/nekomeowww/insights-bot/ent/metricopenaichatcompletiontokenusage"
 	"github.com/nekomeowww/insights-bot/ent/sentmessages"
 	"github.com/nekomeowww/insights-bot/ent/slackoauthcredentials"
+	"github.com/nekomeowww/insights-bot/ent/telegramchat"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatautorecapssubscribers"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatfeatureflags"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatrecapsoptions"
@@ -51,6 +52,8 @@ type Client struct {
 	SentMessages *SentMessagesClient
 	// SlackOAuthCredentials is the client for interacting with the SlackOAuthCredentials builders.
 	SlackOAuthCredentials *SlackOAuthCredentialsClient
+	// TelegramChat is the client for interacting with the TelegramChat builders.
+	TelegramChat *TelegramChatClient
 	// TelegramChatAutoRecapsSubscribers is the client for interacting with the TelegramChatAutoRecapsSubscribers builders.
 	TelegramChatAutoRecapsSubscribers *TelegramChatAutoRecapsSubscribersClient
 	// TelegramChatFeatureFlags is the client for interacting with the TelegramChatFeatureFlags builders.
@@ -76,6 +79,7 @@ func (c *Client) init() {
 	c.MetricOpenAIChatCompletionTokenUsage = NewMetricOpenAIChatCompletionTokenUsageClient(c.config)
 	c.SentMessages = NewSentMessagesClient(c.config)
 	c.SlackOAuthCredentials = NewSlackOAuthCredentialsClient(c.config)
+	c.TelegramChat = NewTelegramChatClient(c.config)
 	c.TelegramChatAutoRecapsSubscribers = NewTelegramChatAutoRecapsSubscribersClient(c.config)
 	c.TelegramChatFeatureFlags = NewTelegramChatFeatureFlagsClient(c.config)
 	c.TelegramChatRecapsOptions = NewTelegramChatRecapsOptionsClient(c.config)
@@ -181,6 +185,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		MetricOpenAIChatCompletionTokenUsage: NewMetricOpenAIChatCompletionTokenUsageClient(cfg),
 		SentMessages:                         NewSentMessagesClient(cfg),
 		SlackOAuthCredentials:                NewSlackOAuthCredentialsClient(cfg),
+		TelegramChat:                         NewTelegramChatClient(cfg),
 		TelegramChatAutoRecapsSubscribers:    NewTelegramChatAutoRecapsSubscribersClient(cfg),
 		TelegramChatFeatureFlags:             NewTelegramChatFeatureFlagsClient(cfg),
 		TelegramChatRecapsOptions:            NewTelegramChatRecapsOptionsClient(cfg),
@@ -211,6 +216,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		MetricOpenAIChatCompletionTokenUsage: NewMetricOpenAIChatCompletionTokenUsageClient(cfg),
 		SentMessages:                         NewSentMessagesClient(cfg),
 		SlackOAuthCredentials:                NewSlackOAuthCredentialsClient(cfg),
+		TelegramChat:                         NewTelegramChatClient(cfg),
 		TelegramChatAutoRecapsSubscribers:    NewTelegramChatAutoRecapsSubscribersClient(cfg),
 		TelegramChatFeatureFlags:             NewTelegramChatFeatureFlagsClient(cfg),
 		TelegramChatRecapsOptions:            NewTelegramChatRecapsOptionsClient(cfg),
@@ -246,7 +252,7 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ChatHistories, c.FeedbackChatHistoriesRecapsReactions,
 		c.FeedbackSummarizationsReactions, c.LogChatHistoriesRecap,
 		c.LogSummarizations, c.MetricOpenAIChatCompletionTokenUsage, c.SentMessages,
-		c.SlackOAuthCredentials, c.TelegramChatAutoRecapsSubscribers,
+		c.SlackOAuthCredentials, c.TelegramChat, c.TelegramChatAutoRecapsSubscribers,
 		c.TelegramChatFeatureFlags, c.TelegramChatRecapsOptions,
 	} {
 		n.Use(hooks...)
@@ -260,7 +266,7 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ChatHistories, c.FeedbackChatHistoriesRecapsReactions,
 		c.FeedbackSummarizationsReactions, c.LogChatHistoriesRecap,
 		c.LogSummarizations, c.MetricOpenAIChatCompletionTokenUsage, c.SentMessages,
-		c.SlackOAuthCredentials, c.TelegramChatAutoRecapsSubscribers,
+		c.SlackOAuthCredentials, c.TelegramChat, c.TelegramChatAutoRecapsSubscribers,
 		c.TelegramChatFeatureFlags, c.TelegramChatRecapsOptions,
 	} {
 		n.Intercept(interceptors...)
@@ -286,6 +292,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.SentMessages.mutate(ctx, m)
 	case *SlackOAuthCredentialsMutation:
 		return c.SlackOAuthCredentials.mutate(ctx, m)
+	case *TelegramChatMutation:
+		return c.TelegramChat.mutate(ctx, m)
 	case *TelegramChatAutoRecapsSubscribersMutation:
 		return c.TelegramChatAutoRecapsSubscribers.mutate(ctx, m)
 	case *TelegramChatFeatureFlagsMutation:
@@ -1361,6 +1369,139 @@ func (c *SlackOAuthCredentialsClient) mutate(ctx context.Context, m *SlackOAuthC
 	}
 }
 
+// TelegramChatClient is a client for the TelegramChat schema.
+type TelegramChatClient struct {
+	config
+}
+
+// NewTelegramChatClient returns a client for the TelegramChat from the given config.
+func NewTelegramChatClient(c config) *TelegramChatClient {
+	return &TelegramChatClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `telegramchat.Hooks(f(g(h())))`.
+func (c *TelegramChatClient) Use(hooks ...Hook) {
+	c.hooks.TelegramChat = append(c.hooks.TelegramChat, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `telegramchat.Intercept(f(g(h())))`.
+func (c *TelegramChatClient) Intercept(interceptors ...Interceptor) {
+	c.inters.TelegramChat = append(c.inters.TelegramChat, interceptors...)
+}
+
+// Create returns a builder for creating a TelegramChat entity.
+func (c *TelegramChatClient) Create() *TelegramChatCreate {
+	mutation := newTelegramChatMutation(c.config, OpCreate)
+	return &TelegramChatCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of TelegramChat entities.
+func (c *TelegramChatClient) CreateBulk(builders ...*TelegramChatCreate) *TelegramChatCreateBulk {
+	return &TelegramChatCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *TelegramChatClient) MapCreateBulk(slice any, setFunc func(*TelegramChatCreate, int)) *TelegramChatCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &TelegramChatCreateBulk{err: fmt.Errorf("calling to TelegramChatClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*TelegramChatCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &TelegramChatCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for TelegramChat.
+func (c *TelegramChatClient) Update() *TelegramChatUpdate {
+	mutation := newTelegramChatMutation(c.config, OpUpdate)
+	return &TelegramChatUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *TelegramChatClient) UpdateOne(tc *TelegramChat) *TelegramChatUpdateOne {
+	mutation := newTelegramChatMutation(c.config, OpUpdateOne, withTelegramChat(tc))
+	return &TelegramChatUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *TelegramChatClient) UpdateOneID(id int64) *TelegramChatUpdateOne {
+	mutation := newTelegramChatMutation(c.config, OpUpdateOne, withTelegramChatID(id))
+	return &TelegramChatUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for TelegramChat.
+func (c *TelegramChatClient) Delete() *TelegramChatDelete {
+	mutation := newTelegramChatMutation(c.config, OpDelete)
+	return &TelegramChatDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *TelegramChatClient) DeleteOne(tc *TelegramChat) *TelegramChatDeleteOne {
+	return c.DeleteOneID(tc.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *TelegramChatClient) DeleteOneID(id int64) *TelegramChatDeleteOne {
+	builder := c.Delete().Where(telegramchat.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &TelegramChatDeleteOne{builder}
+}
+
+// Query returns a query builder for TelegramChat.
+func (c *TelegramChatClient) Query() *TelegramChatQuery {
+	return &TelegramChatQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeTelegramChat},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a TelegramChat entity by its id.
+func (c *TelegramChatClient) Get(ctx context.Context, id int64) (*TelegramChat, error) {
+	return c.Query().Where(telegramchat.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *TelegramChatClient) GetX(ctx context.Context, id int64) *TelegramChat {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *TelegramChatClient) Hooks() []Hook {
+	return c.hooks.TelegramChat
+}
+
+// Interceptors returns the client interceptors.
+func (c *TelegramChatClient) Interceptors() []Interceptor {
+	return c.inters.TelegramChat
+}
+
+func (c *TelegramChatClient) mutate(ctx context.Context, m *TelegramChatMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TelegramChatCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TelegramChatUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TelegramChatUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TelegramChatDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown TelegramChat mutation op: %q", m.Op())
+	}
+}
+
 // TelegramChatAutoRecapsSubscribersClient is a client for the TelegramChatAutoRecapsSubscribers schema.
 type TelegramChatAutoRecapsSubscribersClient struct {
 	config
@@ -1766,14 +1907,14 @@ type (
 		ChatHistories, FeedbackChatHistoriesRecapsReactions,
 		FeedbackSummarizationsReactions, LogChatHistoriesRecap, LogSummarizations,
 		MetricOpenAIChatCompletionTokenUsage, SentMessages, SlackOAuthCredentials,
-		TelegramChatAutoRecapsSubscribers, TelegramChatFeatureFlags,
+		TelegramChat, TelegramChatAutoRecapsSubscribers, TelegramChatFeatureFlags,
 		TelegramChatRecapsOptions []ent.Hook
 	}
 	inters struct {
 		ChatHistories, FeedbackChatHistoriesRecapsReactions,
 		FeedbackSummarizationsReactions, LogChatHistoriesRecap, LogSummarizations,
 		MetricOpenAIChatCompletionTokenUsage, SentMessages, SlackOAuthCredentials,
-		TelegramChatAutoRecapsSubscribers, TelegramChatFeatureFlags,
+		TelegramChat, TelegramChatAutoRecapsSubscribers, TelegramChatFeatureFlags,
 		TelegramChatRecapsOptions []ent.Interceptor
 	}
 )

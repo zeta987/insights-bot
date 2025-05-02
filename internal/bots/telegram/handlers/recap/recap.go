@@ -89,7 +89,7 @@ func (h *Handlers) Install(dispatcher *tgbot.Dispatcher) {
 	dispatcher.OnStartCommand(tgbot.NewHandler(h.command.handleStartCommandWithPrivateSubscriptionsRecap))
 	dispatcher.OnStartCommand(tgbot.NewHandler(h.command.handleStartCommandWithRecapSubscription))
 
-	dispatcher.OnCallbackQuery("recap/recap/select_hours", tgbot.NewHandler(h.callbackQuery.handleCallbackQuerySelectHours))
+	dispatcher.OnCallbackQuery(SelectHourAction, tgbot.NewHandler(h.callbackQuery.handleCallbackQuerySelectHours))
 	dispatcher.OnCallbackQuery("recap/configure/toggle", tgbot.NewHandler(h.callbackQuery.handleCallbackQueryToggle))
 	dispatcher.OnCallbackQuery("recap/configure/assign_mode", tgbot.NewHandler(h.callbackQuery.handleCallbackQueryAssignMode))
 	dispatcher.OnCallbackQuery("recap/configure/complete", tgbot.NewHandler(h.callbackQuery.handleCallbackQueryComplete))

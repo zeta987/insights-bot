@@ -13,6 +13,7 @@ import (
 	"github.com/nekomeowww/insights-bot/ent/schema"
 	"github.com/nekomeowww/insights-bot/ent/sentmessages"
 	"github.com/nekomeowww/insights-bot/ent/slackoauthcredentials"
+	"github.com/nekomeowww/insights-bot/ent/telegramchat"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatautorecapssubscribers"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatfeatureflags"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatrecapsoptions"
@@ -362,6 +363,12 @@ func init() {
 	slackoauthcredentialsDescID := slackoauthcredentialsFields[0].Descriptor()
 	// slackoauthcredentials.DefaultID holds the default value on creation for the id field.
 	slackoauthcredentials.DefaultID = slackoauthcredentialsDescID.Default.(func() uuid.UUID)
+	telegramchatFields := schema.TelegramChat{}.Fields()
+	_ = telegramchatFields
+	// telegramchatDescIsForum is the schema descriptor for is_forum field.
+	telegramchatDescIsForum := telegramchatFields[4].Descriptor()
+	// telegramchat.DefaultIsForum holds the default value on creation for the is_forum field.
+	telegramchat.DefaultIsForum = telegramchatDescIsForum.Default.(bool)
 	telegramchatautorecapssubscribersFields := schema.TelegramChatAutoRecapsSubscribers{}.Fields()
 	_ = telegramchatautorecapssubscribersFields
 	// telegramchatautorecapssubscribersDescChatID is the schema descriptor for chat_id field.

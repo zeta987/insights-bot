@@ -28,6 +28,8 @@ type Tx struct {
 	SentMessages *SentMessagesClient
 	// SlackOAuthCredentials is the client for interacting with the SlackOAuthCredentials builders.
 	SlackOAuthCredentials *SlackOAuthCredentialsClient
+	// TelegramChat is the client for interacting with the TelegramChat builders.
+	TelegramChat *TelegramChatClient
 	// TelegramChatAutoRecapsSubscribers is the client for interacting with the TelegramChatAutoRecapsSubscribers builders.
 	TelegramChatAutoRecapsSubscribers *TelegramChatAutoRecapsSubscribersClient
 	// TelegramChatFeatureFlags is the client for interacting with the TelegramChatFeatureFlags builders.
@@ -173,6 +175,7 @@ func (tx *Tx) init() {
 	tx.MetricOpenAIChatCompletionTokenUsage = NewMetricOpenAIChatCompletionTokenUsageClient(tx.config)
 	tx.SentMessages = NewSentMessagesClient(tx.config)
 	tx.SlackOAuthCredentials = NewSlackOAuthCredentialsClient(tx.config)
+	tx.TelegramChat = NewTelegramChatClient(tx.config)
 	tx.TelegramChatAutoRecapsSubscribers = NewTelegramChatAutoRecapsSubscribersClient(tx.config)
 	tx.TelegramChatFeatureFlags = NewTelegramChatFeatureFlagsClient(tx.config)
 	tx.TelegramChatRecapsOptions = NewTelegramChatRecapsOptionsClient(tx.config)

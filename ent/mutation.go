@@ -20,6 +20,7 @@ import (
 	"github.com/nekomeowww/insights-bot/ent/predicate"
 	"github.com/nekomeowww/insights-bot/ent/sentmessages"
 	"github.com/nekomeowww/insights-bot/ent/slackoauthcredentials"
+	"github.com/nekomeowww/insights-bot/ent/telegramchat"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatautorecapssubscribers"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatfeatureflags"
 	"github.com/nekomeowww/insights-bot/ent/telegramchatrecapsoptions"
@@ -42,6 +43,7 @@ const (
 	TypeMetricOpenAIChatCompletionTokenUsage = "MetricOpenAIChatCompletionTokenUsage"
 	TypeSentMessages                         = "SentMessages"
 	TypeSlackOAuthCredentials                = "SlackOAuthCredentials"
+	TypeTelegramChat                         = "TelegramChat"
 	TypeTelegramChatAutoRecapsSubscribers    = "TelegramChatAutoRecapsSubscribers"
 	TypeTelegramChatFeatureFlags             = "TelegramChatFeatureFlags"
 	TypeTelegramChatRecapsOptions            = "TelegramChatRecapsOptions"
@@ -7828,6 +7830,541 @@ func (m *SlackOAuthCredentialsMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *SlackOAuthCredentialsMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown SlackOAuthCredentials edge %s", name)
+}
+
+// TelegramChatMutation represents an operation that mutates the TelegramChat nodes in the graph.
+type TelegramChatMutation struct {
+	config
+	op            Op
+	typ           string
+	id            *int64
+	_type         *string
+	title         *string
+	username      *string
+	is_forum      *bool
+	clearedFields map[string]struct{}
+	done          bool
+	oldValue      func(context.Context) (*TelegramChat, error)
+	predicates    []predicate.TelegramChat
+}
+
+var _ ent.Mutation = (*TelegramChatMutation)(nil)
+
+// telegramchatOption allows management of the mutation configuration using functional options.
+type telegramchatOption func(*TelegramChatMutation)
+
+// newTelegramChatMutation creates new mutation for the TelegramChat entity.
+func newTelegramChatMutation(c config, op Op, opts ...telegramchatOption) *TelegramChatMutation {
+	m := &TelegramChatMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeTelegramChat,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withTelegramChatID sets the ID field of the mutation.
+func withTelegramChatID(id int64) telegramchatOption {
+	return func(m *TelegramChatMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *TelegramChat
+		)
+		m.oldValue = func(ctx context.Context) (*TelegramChat, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().TelegramChat.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withTelegramChat sets the old TelegramChat of the mutation.
+func withTelegramChat(node *TelegramChat) telegramchatOption {
+	return func(m *TelegramChatMutation) {
+		m.oldValue = func(context.Context) (*TelegramChat, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m TelegramChatMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m TelegramChatMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of TelegramChat entities.
+func (m *TelegramChatMutation) SetID(id int64) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *TelegramChatMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *TelegramChatMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().TelegramChat.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetType sets the "type" field.
+func (m *TelegramChatMutation) SetType(s string) {
+	m._type = &s
+}
+
+// GetType returns the value of the "type" field in the mutation.
+func (m *TelegramChatMutation) GetType() (r string, exists bool) {
+	v := m._type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldType returns the old "type" field's value of the TelegramChat entity.
+// If the TelegramChat object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TelegramChatMutation) OldType(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldType: %w", err)
+	}
+	return oldValue.Type, nil
+}
+
+// ResetType resets all changes to the "type" field.
+func (m *TelegramChatMutation) ResetType() {
+	m._type = nil
+}
+
+// SetTitle sets the "title" field.
+func (m *TelegramChatMutation) SetTitle(s string) {
+	m.title = &s
+}
+
+// Title returns the value of the "title" field in the mutation.
+func (m *TelegramChatMutation) Title() (r string, exists bool) {
+	v := m.title
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTitle returns the old "title" field's value of the TelegramChat entity.
+// If the TelegramChat object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TelegramChatMutation) OldTitle(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTitle is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTitle requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTitle: %w", err)
+	}
+	return oldValue.Title, nil
+}
+
+// ClearTitle clears the value of the "title" field.
+func (m *TelegramChatMutation) ClearTitle() {
+	m.title = nil
+	m.clearedFields[telegramchat.FieldTitle] = struct{}{}
+}
+
+// TitleCleared returns if the "title" field was cleared in this mutation.
+func (m *TelegramChatMutation) TitleCleared() bool {
+	_, ok := m.clearedFields[telegramchat.FieldTitle]
+	return ok
+}
+
+// ResetTitle resets all changes to the "title" field.
+func (m *TelegramChatMutation) ResetTitle() {
+	m.title = nil
+	delete(m.clearedFields, telegramchat.FieldTitle)
+}
+
+// SetUsername sets the "username" field.
+func (m *TelegramChatMutation) SetUsername(s string) {
+	m.username = &s
+}
+
+// Username returns the value of the "username" field in the mutation.
+func (m *TelegramChatMutation) Username() (r string, exists bool) {
+	v := m.username
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsername returns the old "username" field's value of the TelegramChat entity.
+// If the TelegramChat object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TelegramChatMutation) OldUsername(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsername is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsername requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsername: %w", err)
+	}
+	return oldValue.Username, nil
+}
+
+// ClearUsername clears the value of the "username" field.
+func (m *TelegramChatMutation) ClearUsername() {
+	m.username = nil
+	m.clearedFields[telegramchat.FieldUsername] = struct{}{}
+}
+
+// UsernameCleared returns if the "username" field was cleared in this mutation.
+func (m *TelegramChatMutation) UsernameCleared() bool {
+	_, ok := m.clearedFields[telegramchat.FieldUsername]
+	return ok
+}
+
+// ResetUsername resets all changes to the "username" field.
+func (m *TelegramChatMutation) ResetUsername() {
+	m.username = nil
+	delete(m.clearedFields, telegramchat.FieldUsername)
+}
+
+// SetIsForum sets the "is_forum" field.
+func (m *TelegramChatMutation) SetIsForum(b bool) {
+	m.is_forum = &b
+}
+
+// IsForum returns the value of the "is_forum" field in the mutation.
+func (m *TelegramChatMutation) IsForum() (r bool, exists bool) {
+	v := m.is_forum
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldIsForum returns the old "is_forum" field's value of the TelegramChat entity.
+// If the TelegramChat object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TelegramChatMutation) OldIsForum(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldIsForum is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldIsForum requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldIsForum: %w", err)
+	}
+	return oldValue.IsForum, nil
+}
+
+// ResetIsForum resets all changes to the "is_forum" field.
+func (m *TelegramChatMutation) ResetIsForum() {
+	m.is_forum = nil
+}
+
+// Where appends a list predicates to the TelegramChatMutation builder.
+func (m *TelegramChatMutation) Where(ps ...predicate.TelegramChat) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the TelegramChatMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *TelegramChatMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.TelegramChat, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *TelegramChatMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *TelegramChatMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (TelegramChat).
+func (m *TelegramChatMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *TelegramChatMutation) Fields() []string {
+	fields := make([]string, 0, 4)
+	if m._type != nil {
+		fields = append(fields, telegramchat.FieldType)
+	}
+	if m.title != nil {
+		fields = append(fields, telegramchat.FieldTitle)
+	}
+	if m.username != nil {
+		fields = append(fields, telegramchat.FieldUsername)
+	}
+	if m.is_forum != nil {
+		fields = append(fields, telegramchat.FieldIsForum)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *TelegramChatMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case telegramchat.FieldType:
+		return m.GetType()
+	case telegramchat.FieldTitle:
+		return m.Title()
+	case telegramchat.FieldUsername:
+		return m.Username()
+	case telegramchat.FieldIsForum:
+		return m.IsForum()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *TelegramChatMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case telegramchat.FieldType:
+		return m.OldType(ctx)
+	case telegramchat.FieldTitle:
+		return m.OldTitle(ctx)
+	case telegramchat.FieldUsername:
+		return m.OldUsername(ctx)
+	case telegramchat.FieldIsForum:
+		return m.OldIsForum(ctx)
+	}
+	return nil, fmt.Errorf("unknown TelegramChat field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *TelegramChatMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case telegramchat.FieldType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetType(v)
+		return nil
+	case telegramchat.FieldTitle:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTitle(v)
+		return nil
+	case telegramchat.FieldUsername:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsername(v)
+		return nil
+	case telegramchat.FieldIsForum:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetIsForum(v)
+		return nil
+	}
+	return fmt.Errorf("unknown TelegramChat field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *TelegramChatMutation) AddedFields() []string {
+	return nil
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *TelegramChatMutation) AddedField(name string) (ent.Value, bool) {
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *TelegramChatMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown TelegramChat numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *TelegramChatMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(telegramchat.FieldTitle) {
+		fields = append(fields, telegramchat.FieldTitle)
+	}
+	if m.FieldCleared(telegramchat.FieldUsername) {
+		fields = append(fields, telegramchat.FieldUsername)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *TelegramChatMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *TelegramChatMutation) ClearField(name string) error {
+	switch name {
+	case telegramchat.FieldTitle:
+		m.ClearTitle()
+		return nil
+	case telegramchat.FieldUsername:
+		m.ClearUsername()
+		return nil
+	}
+	return fmt.Errorf("unknown TelegramChat nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *TelegramChatMutation) ResetField(name string) error {
+	switch name {
+	case telegramchat.FieldType:
+		m.ResetType()
+		return nil
+	case telegramchat.FieldTitle:
+		m.ResetTitle()
+		return nil
+	case telegramchat.FieldUsername:
+		m.ResetUsername()
+		return nil
+	case telegramchat.FieldIsForum:
+		m.ResetIsForum()
+		return nil
+	}
+	return fmt.Errorf("unknown TelegramChat field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *TelegramChatMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *TelegramChatMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *TelegramChatMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *TelegramChatMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *TelegramChatMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *TelegramChatMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *TelegramChatMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown TelegramChat unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *TelegramChatMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown TelegramChat edge %s", name)
 }
 
 // TelegramChatAutoRecapsSubscribersMutation represents an operation that mutates the TelegramChatAutoRecapsSubscribers nodes in the graph.

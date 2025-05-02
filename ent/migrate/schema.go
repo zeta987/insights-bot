@@ -163,6 +163,20 @@ var (
 		Columns:    SlackOauthCredentialsColumns,
 		PrimaryKey: []*schema.Column{SlackOauthCredentialsColumns[0]},
 	}
+	// TelegramChatsColumns holds the columns for the "telegram_chats" table.
+	TelegramChatsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "type", Type: field.TypeString},
+		{Name: "title", Type: field.TypeString, Nullable: true},
+		{Name: "username", Type: field.TypeString, Nullable: true},
+		{Name: "is_forum", Type: field.TypeBool, Default: false},
+	}
+	// TelegramChatsTable holds the schema information for the "telegram_chats" table.
+	TelegramChatsTable = &schema.Table{
+		Name:       "telegram_chats",
+		Columns:    TelegramChatsColumns,
+		PrimaryKey: []*schema.Column{TelegramChatsColumns[0]},
+	}
 	// TelegramChatAutoRecapsSubscribersColumns holds the columns for the "telegram_chat_auto_recaps_subscribers" table.
 	TelegramChatAutoRecapsSubscribersColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeUUID, Unique: true},
@@ -221,6 +235,7 @@ var (
 		MetricOpenAiChatCompletionTokenUsagesTable,
 		SentMessagesTable,
 		SlackOauthCredentialsTable,
+		TelegramChatsTable,
 		TelegramChatAutoRecapsSubscribersTable,
 		TelegramChatFeatureFlagsTable,
 		TelegramChatRecapsOptionsTable,
