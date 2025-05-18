@@ -295,6 +295,27 @@ func (s *Service) CreatePage(ctx context.Context, title, html string) (string, e
 		return "", fmt.Errorf("telegraph access token is not configured")
 	}
 
+	// Escape underscores to prevent them from being interpreted as italics by Telegraph
+	// Only escape underscores that are not part of HTML tags
+	escapedHTML := html
+	inTag := false
+	var result strings.Builder
+	for i := 0; i < len(escapedHTML); i++ {
+		ch := escapedHTML[i]
+		if ch == '<' {
+			inTag = true
+			result.WriteByte(ch)
+		} else if ch == '>' {
+			inTag = false
+			result.WriteByte(ch)
+		} else if ch == '_' && !inTag {
+			result.WriteString("\\_")
+		} else {
+			result.WriteByte(ch)
+		}
+	}
+	escapedHTML = result.String()
+
 	var page *telegraph.Page
 	var lastErr error
 
@@ -315,7 +336,7 @@ func (s *Service) CreatePage(ctx context.Context, title, html string) (string, e
 			p, err := s.client.CreatePage(
 				s.cfg.Telegraph.AccessToken,
 				title,
-				html,
+				escapedHTML,
 				opts,
 			)
 
@@ -360,6 +381,27 @@ func (s *Service) EditPage(ctx context.Context, path, title, html string) (strin
 		return "", fmt.Errorf("telegraph access token is not configured")
 	}
 
+	// Escape underscores to prevent them from being interpreted as italics by Telegraph
+	// Only escape underscores that are not part of HTML tags
+	escapedHTML := html
+	inTag := false
+	var result strings.Builder
+	for i := 0; i < len(escapedHTML); i++ {
+		ch := escapedHTML[i]
+		if ch == '<' {
+			inTag = true
+			result.WriteByte(ch)
+		} else if ch == '>' {
+			inTag = false
+			result.WriteByte(ch)
+		} else if ch == '_' && !inTag {
+			result.WriteString("\\_")
+		} else {
+			result.WriteByte(ch)
+		}
+	}
+	escapedHTML = result.String()
+
 	var page *telegraph.Page
 	var lastErr error
 
@@ -384,7 +426,7 @@ func (s *Service) EditPage(ctx context.Context, path, title, html string) (strin
 				s.cfg.Telegraph.AccessToken,
 				path,
 				title,
-				html,
+				escapedHTML,
 				opts,
 			)
 

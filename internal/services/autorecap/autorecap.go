@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/nekomeowww/fo"
@@ -324,10 +323,9 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 	}
 
 	// 準備 Telegraph 文章內容
-	timestamp := time.Now().Format("2006/01/02 15:04:05")
 	pageTitle := fmt.Sprintf("【群組 %s】自動 %d 小時總結", tgbot.EscapeHTMLSymbols(chatTitle), hours)
 
-	htmlSummary := fmt.Sprintf("<p><small>統計時間範圍：於 %s 發起的過去 %d 小時</small></p><hr>", timestamp, hours)
+	htmlSummary := "<hr>"
 	paragraphsAll := strings.Split(rawSummaryAll, "\n\n")
 	for _, p := range paragraphsAll {
 		if strings.TrimSpace(p) == "" {

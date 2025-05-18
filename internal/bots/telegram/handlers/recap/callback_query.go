@@ -730,7 +730,6 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 	if c.Update.CallbackQuery.From.LastName != "" {
 		actorName += " " + tgbot.EscapeHTMLSymbols(c.Update.CallbackQuery.From.LastName)
 	}
-	timestamp := time.Now().Format("2006/01/02 15:04:05")
 	groupName := tgbot.EscapeHTMLSymbols(data.ChatTitle)
 	if groupName == "" {
 		groupName = "當前聊天"
@@ -741,8 +740,6 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 	// 格式化 HTML 內容（不使用 <article> 以免產生空 tag）
 	var htmlContent strings.Builder
 
-	// 修改統計時間範圍的顯示
-	htmlContent.WriteString(fmt.Sprintf("<p><small>統計時間範圍：於 %s 發起的過去 %d 小時</small></p>", timestamp, data.Hour))
 	htmlContent.WriteString("<hr>")
 
 	// 添加摘要內容
