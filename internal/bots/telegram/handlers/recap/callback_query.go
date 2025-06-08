@@ -23,6 +23,42 @@ import (
 	"github.com/nekomeowww/insights-bot/pkg/types/tgchat"
 )
 
+func formatToHTML(text string) string {
+	var html strings.Builder
+	inBold := false
+	inItalic := false
+
+	for i := 0; i < len(text); i++ {
+		char := text[i]
+		switch char {
+		case '*':
+			if inBold {
+				html.WriteString("</b>")
+			} else {
+				html.WriteString("<b>")
+			}
+			inBold = !inBold
+		case '_':
+			if inItalic {
+				html.WriteString("</i>")
+			} else {
+				html.WriteString("<i>")
+			}
+			inItalic = !inItalic
+		default:
+			html.WriteByte(char)
+		}
+	}
+	// Close any unclosed tags
+	if inBold {
+		html.WriteString("</b>")
+	}
+	if inItalic {
+		html.WriteString("</i>")
+	}
+	return html.String()
+}
+
 type NewCallbackQueryHandlerParams struct {
 	fx.In
 
@@ -655,7 +691,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
 	}
 	if !lo.Contains(RecapSelectHourAvailable, data.Hour) {
-		return nil, tgbot.NewExceptionError(fmt.Errorf("invalid hour: %d", data.Hour)).WithReply(replyToMessage)
+		return nil, tgbot.NewExceptionError(fmt.Errorf("invalid hour: %d")).WithReply(replyToMessage)
 	}
 
 	var inProgressText string
@@ -743,29 +779,22 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 	htmlContent.WriteString("<hr>")
 
 	// 添加摘要內容
-	for _, summary := range summarizations {
-		// 處理段落格式
-		paragraphs := strings.Split(summary, "\n\n")
-		for _, p := range paragraphs {
-			if strings.TrimSpace(p) != "" {
-				// 處理特殊格式
-				// 將 Markdown 風格的標題轉換為 HTML 標題
-				if strings.HasPrefix(p, "##") {
-					titleText := strings.TrimPrefix(p, "##")
-					titleText = strings.TrimSpace(titleText)
-					htmlContent.WriteString("<h2>" + titleText + "</h2>")
-					continue
-				}
-
-				p = strings.ReplaceAll(p, "*", "<b>") // 將 Markdown 風格的粗體轉換為 HTML
-				p = strings.ReplaceAll(p, "*", "</b>")
-				p = strings.ReplaceAll(p, "_", "<i>") // 將 Markdown 風格的斜體轉換為 HTML
-				p = strings.ReplaceAll(p, "_", "</i>")
-
-				htmlContent.WriteString("<p>" + p + "</p>")
+	for _, summaryBlock := range summarizations {
+		lines := strings.Split(summaryBlock, "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			if strings.HasPrefix(line, "## ") {
+				titleContent := strings.TrimPrefix(line, "## ")
+				// The content from template may already contain HTML tags like <a>, so no escaping here.
+				htmlContent.WriteString("<h2>" + titleContent + "</h2>")
+			} else {
+				// For other lines, just wrap them in <p> tags.
+				// The content inside (participants, discussion points) is already escaped or formatted by the template.
+				htmlContent.WriteString("<p>" + line + "</p>")
 			}
 		}
-		htmlContent.WriteString("<br/>")
 	}
 
 	// 新增頁腳
@@ -867,7 +896,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		telegraphURL,
 		tgbot.EscapeHTMLSymbols(pageTitle),
 		multiPageInfo,
-		condensedSummary,
+		tgbot.EscapeHTMLSymbols(condensedSummary),
 		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由於群組不是超級群組（supergroup），因此消息鏈接引用暫時被禁用了，如果希望使用該功能，請通過短時間內將群組開放為公共群組並還原回私有群組，或通過其他操作將本群組升級為超級群組後，該功能方可恢復正常運作。\n\n", ""),
 		modelName,
 	)

@@ -151,7 +151,8 @@ func filterOutInvalidOutputFilterFunc(output *openai.ChatHistorySummarizationOut
 
 func filterOutMention(output *openai.ChatHistorySummarizationOutputs, _ int) *openai.ChatHistorySummarizationOutputs {
 	output.Participants = lo.Map(output.Participants, func(item string, _ int) string {
-		return strings.TrimPrefix(item, "@")
+		item = strings.TrimPrefix(item, "@")
+		return tgbot.EscapeHTMLSymbols(item)
 	})
 
 	return output

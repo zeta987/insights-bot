@@ -29,6 +29,42 @@ import (
 	"github.com/nekomeowww/insights-bot/pkg/types/timecapsules"
 )
 
+func formatToHTML(text string) string {
+	var html strings.Builder
+	inBold := false
+	inItalic := false
+
+	for i := 0; i < len(text); i++ {
+		char := text[i]
+		switch char {
+		case '*':
+			if inBold {
+				html.WriteString("</b>")
+			} else {
+				html.WriteString("<b>")
+			}
+			inBold = !inBold
+		case '_':
+			if inItalic {
+				html.WriteString("</i>")
+			} else {
+				html.WriteString("<i>")
+			}
+			inItalic = !inItalic
+		default:
+			html.WriteByte(char)
+		}
+	}
+	// Close any unclosed tags
+	if inBold {
+		html.WriteString("</b>")
+	}
+	if inItalic {
+		html.WriteString("</i>")
+	}
+	return html.String()
+}
+
 type NewAutoRecapParams struct {
 	fx.In
 
@@ -291,13 +327,6 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 		return
 	}
 
-	// 處理 Markdown 標題
-	for i, s := range summarizations {
-		summarizations[i] = tgbot.ReplaceMarkdownTitlesToTelegramBoldElement(s)
-	}
-
-	// 合併所有摘要
-	rawSummaryAll := strings.Join(summarizations, "\n\n")
 	modelName := m.chathistories.GetOpenAIModelName()
 
 	// 生成銳評式濃縮總結
@@ -326,23 +355,22 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 	pageTitle := fmt.Sprintf("【群組 %s】自動 %d 小時總結", tgbot.EscapeHTMLSymbols(chatTitle), hours)
 
 	htmlSummary := "<hr>"
-	paragraphsAll := strings.Split(rawSummaryAll, "\n\n")
-	for _, p := range paragraphsAll {
-		if strings.TrimSpace(p) == "" {
-			continue
+	for _, summaryBlock := range summarizations {
+		lines := strings.Split(summaryBlock, "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			if strings.HasPrefix(line, "## ") {
+				titleContent := strings.TrimPrefix(line, "## ")
+				// The content from template may already contain HTML tags like <a>, so no escaping here.
+				htmlSummary += "<h2>" + titleContent + "</h2>"
+			} else {
+				// For other lines, just wrap them in <p> tags.
+				// The content inside (participants, discussion points) is already escaped or formatted by the template.
+				htmlSummary += "<p>" + line + "</p>"
+			}
 		}
-		if strings.HasPrefix(p, "##") {
-			titleText := strings.TrimSpace(strings.TrimPrefix(p, "##"))
-			htmlSummary += "<h2>" + titleText + "</h2>"
-			continue
-		}
-
-		p = strings.ReplaceAll(p, "*", "<b>")
-		p = strings.ReplaceAll(p, "*", "</b>")
-		p = strings.ReplaceAll(p, "_", "<i>")
-		p = strings.ReplaceAll(p, "_", "</i>")
-
-		htmlSummary += "<p>" + p + "</p>"
 	}
 
 	htmlSummary += "<hr><p><em>由 " + modelName + " 生成</em></p>"
@@ -396,8 +424,8 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 		telegraphURL,
 		tgbot.EscapeHTMLSymbols(pageTitle),
 		multiPageInfo,
-		condensedSummary,
-		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由于群组不是超级群组（supergroup），因此消息链接引用暂时被禁用了，如果希望使用该功能，请通过短时间内将群组开放为公共群组并还原回私有群组，或通过其他操作将本群组升级为超级群组后，该功能方可恢复正常运作。\n\n", ""),
+		tgbot.EscapeHTMLSymbols(condensedSummary),
+		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由于群组不是超级群组（supergroup），因此消息链接引用暂时被禁用了，如果希望使用该功能，请通过短时间内将群组开放为公共群组并还原回私有群组，或通过其他操作将本群组升级为超级群組后，该功能方可恢复正常运作。\n\n", ""),
 		modelName,
 	)
 
