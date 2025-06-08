@@ -25,6 +25,7 @@ import (
 //counterfeiter:generate -o openaimock/mock_client.go --fake-name MockClient . Client
 type Client interface {
 	GetModelName() string
+	GetSarcasticCondensedModelName() string
 	SplitContentBasedByTokenLimitations(textContent string, limits int) []string
 	SummarizeAny(ctx context.Context, content string) (*openai.ChatCompletionResponse, error)
 	SummarizeChatHistories(ctx context.Context, llmFriendlyChatHistories string, language string) (*openai.ChatCompletionResponse, error)
@@ -115,6 +116,10 @@ func NewClient(enableMetricRecordForTokens bool) func(NewClientParams) (Client, 
 
 func (c *OpenAIClient) GetModelName() string {
 	return c.modelName
+}
+
+func (c *OpenAIClient) GetSarcasticCondensedModelName() string {
+	return c.sarcasticCondensedModelName
 }
 
 // truncateContentBasedOnTokens 基于 token 计算的方式截断文本。

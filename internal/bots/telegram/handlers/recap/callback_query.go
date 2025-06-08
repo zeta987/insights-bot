@@ -799,7 +799,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 
 	// 新增頁腳
 	htmlContent.WriteString("<hr>")
-	htmlContent.WriteString(fmt.Sprintf("<p><em>🤖️ 由 %s 生成</em></p>", h.chatHistories.GetOpenAIModelName()))
+	htmlContent.WriteString(fmt.Sprintf("<p><em>🤖️ 由 %s 生成 分段總結</em></p>", h.chatHistories.GetOpenAIModelName()))
 
 	// Create Telegraph page with retry mechanism, support multiple pages if needed
 	var telegraphURL string
@@ -882,6 +882,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 
 	// Send the link to Telegram
 	modelName := h.chatHistories.GetOpenAIModelName()
+	sarcasticModelName := h.chatHistories.GetSarcasticCondensedModelName()
 
 	// 添加多頁信息（如果有多頁）
 	multiPageInfo := ""
@@ -892,12 +893,13 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		}
 	}
 
-	content := fmt.Sprintf("📝 <b>聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap\n<i>🤖️ 由 %s 生成</i>",
+	content := fmt.Sprintf("📝 <b>聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap\n<i>🤖️ 由 %s 生成 濃縮總結</i>\n<i>🤖️ 由 %s 生成 分段總結</i>",
 		telegraphURL,
 		tgbot.EscapeHTMLSymbols(pageTitle),
 		multiPageInfo,
 		tgbot.EscapeHTMLSymbols(condensedSummary),
 		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由於群組不是超級群組（supergroup），因此消息鏈接引用暫時被禁用了，如果希望使用該功能，請通過短時間內將群組開放為公共群組並還原回私有群組，或通過其他操作將本群組升級為超級群組後，該功能方可恢復正常運作。\n\n", ""),
+		sarcasticModelName,
 		modelName,
 	)
 

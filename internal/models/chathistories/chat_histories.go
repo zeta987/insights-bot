@@ -478,3 +478,7 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 func (m *Model) GetOpenAIModelName() string {
 	return m.openAI.GetModelName()
 }
+
+func (m *Model) GetSarcasticCondensedModelName() string {
+	return m.openAI.GetSarcasticCondensedModelName()
+}

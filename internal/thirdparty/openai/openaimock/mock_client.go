@@ -20,6 +20,16 @@ type MockClient struct {
 	getModelNameReturnsOnCall map[int]struct {
 		result1 string
 	}
+	GetSarcasticCondensedModelNameStub        func() string
+	getSarcasticCondensedModelNameMutex       sync.RWMutex
+	getSarcasticCondensedModelNameArgsForCall []struct {
+	}
+	getSarcasticCondensedModelNameReturns struct {
+		result1 string
+	}
+	getSarcasticCondensedModelNameReturnsOnCall map[int]struct {
+		result1 string
+	}
 	SarcasticCondenseStub        func(context.Context, string) (string, error)
 	sarcasticCondenseMutex       sync.RWMutex
 	sarcasticCondenseArgsForCall []struct {
@@ -170,6 +180,59 @@ func (fake *MockClient) GetModelNameReturnsOnCall(i int, result1 string) {
 		})
 	}
 	fake.getModelNameReturnsOnCall[i] = struct {
+		result1 string
+	}{result1}
+}
+
+func (fake *MockClient) GetSarcasticCondensedModelName() string {
+	fake.getSarcasticCondensedModelNameMutex.Lock()
+	ret, specificReturn := fake.getSarcasticCondensedModelNameReturnsOnCall[len(fake.getSarcasticCondensedModelNameArgsForCall)]
+	fake.getSarcasticCondensedModelNameArgsForCall = append(fake.getSarcasticCondensedModelNameArgsForCall, struct {
+	}{})
+	stub := fake.GetSarcasticCondensedModelNameStub
+	fakeReturns := fake.getSarcasticCondensedModelNameReturns
+	fake.recordInvocation("GetSarcasticCondensedModelName", []interface{}{})
+	fake.getSarcasticCondensedModelNameMutex.Unlock()
+	if stub != nil {
+		return stub()
+	}
+	if specificReturn {
+		return ret.result1
+	}
+	return fakeReturns.result1
+}
+
+func (fake *MockClient) GetSarcasticCondensedModelNameCallCount() int {
+	fake.getSarcasticCondensedModelNameMutex.RLock()
+	defer fake.getSarcasticCondensedModelNameMutex.RUnlock()
+	return len(fake.getSarcasticCondensedModelNameArgsForCall)
+}
+
+func (fake *MockClient) GetSarcasticCondensedModelNameCalls(stub func() string) {
+	fake.getSarcasticCondensedModelNameMutex.Lock()
+	defer fake.getSarcasticCondensedModelNameMutex.Unlock()
+	fake.GetSarcasticCondensedModelNameStub = stub
+}
+
+func (fake *MockClient) GetSarcasticCondensedModelNameReturns(result1 string) {
+	fake.getSarcasticCondensedModelNameMutex.Lock()
+	defer fake.getSarcasticCondensedModelNameMutex.Unlock()
+	fake.GetSarcasticCondensedModelNameStub = nil
+	fake.getSarcasticCondensedModelNameReturns = struct {
+		result1 string
+	}{result1}
+}
+
+func (fake *MockClient) GetSarcasticCondensedModelNameReturnsOnCall(i int, result1 string) {
+	fake.getSarcasticCondensedModelNameMutex.Lock()
+	defer fake.getSarcasticCondensedModelNameMutex.Unlock()
+	fake.GetSarcasticCondensedModelNameStub = nil
+	if fake.getSarcasticCondensedModelNameReturnsOnCall == nil {
+		fake.getSarcasticCondensedModelNameReturnsOnCall = make(map[int]struct {
+			result1 string
+		})
+	}
+	fake.getSarcasticCondensedModelNameReturnsOnCall[i] = struct {
 		result1 string
 	}{result1}
 }
@@ -631,6 +694,8 @@ func (fake *MockClient) Invocations() map[string][][]interface{} {
 	defer fake.invocationsMutex.RUnlock()
 	fake.getModelNameMutex.RLock()
 	defer fake.getModelNameMutex.RUnlock()
+	fake.getSarcasticCondensedModelNameMutex.RLock()
+	defer fake.getSarcasticCondensedModelNameMutex.RUnlock()
 	fake.sarcasticCondenseMutex.RLock()
 	defer fake.sarcasticCondenseMutex.RUnlock()
 	fake.splitContentBasedByTokenLimitationsMutex.RLock()
