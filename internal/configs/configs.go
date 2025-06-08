@@ -71,6 +71,10 @@ const (
 	EnvSarcasticCondensedSystemPrompt = "SARCASTIC_CONDENSED_SYSTEM_PROMPT"
 	// Sarcastic condensed user prompt
 	EnvSarcasticCondensedUserPrompt = "SARCASTIC_CONDENSED_USER_PROMPT"
+	// Sarcastic condensed model name
+	EnvSarcasticCondensedModelName = "SARCASTIC_CONDENSED_MODEL_NAME"
+	// Chat histories summarization language
+	EnvChatHistoriesSummarizationLanguage = "CHAT_HISTORIES_SUMMARIZATION_LANGUAGE"
 )
 
 type SectionPineconeIndexes struct {
@@ -123,11 +127,13 @@ type SectionHardLimit struct {
 }
 
 type SectionOpenAI struct {
-	Secret                       string
-	Host                         string
-	ModelName                    string
-	TokenLimit                   int64
-	ChatHistoriesRecapTokenLimit int64
+	Secret                             string
+	Host                               string
+	ModelName                          string
+	TokenLimit                         int64
+	ChatHistoriesRecapTokenLimit       int64
+	SarcasticCondensedModelName        string
+	ChatHistoriesSummarizationLanguage string
 }
 
 type SectionTelegraph struct {
@@ -250,11 +256,13 @@ func NewConfig() func() (*Config, error) {
 				ClientSecret: getEnv(EnvSlackClientSecret),
 			},
 			OpenAI: SectionOpenAI{
-				Secret:                       getEnv(EnvOpenAIAPISecret),
-				Host:                         getEnv(EnvOpenAIAPIHost),
-				ModelName:                    lo.Ternary(getEnv(EnvOpenAIAPIModelName) == "", goopenai.GPT3Dot5Turbo, getEnv(EnvOpenAIAPIModelName)),
-				TokenLimit:                   lo.Ternary(tokenLimitParseErr == nil, lo.Ternary(tokenLimit != 0, tokenLimit, 4096), 4096),
-				ChatHistoriesRecapTokenLimit: lo.Ternary(chatHistoriesRecapTokenLimitParseErr == nil, lo.Ternary(chatHistoriesRecapTokenLimit != 0, chatHistoriesRecapTokenLimit, 2000), 2000),
+				Secret:                             getEnv(EnvOpenAIAPISecret),
+				Host:                               getEnv(EnvOpenAIAPIHost),
+				ModelName:                          lo.Ternary(getEnv(EnvOpenAIAPIModelName) == "", goopenai.GPT3Dot5Turbo, getEnv(EnvOpenAIAPIModelName)),
+				TokenLimit:                         lo.Ternary(tokenLimitParseErr == nil, lo.Ternary(tokenLimit != 0, tokenLimit, 4096), 4096),
+				ChatHistoriesRecapTokenLimit:       lo.Ternary(chatHistoriesRecapTokenLimitParseErr == nil, lo.Ternary(chatHistoriesRecapTokenLimit != 0, chatHistoriesRecapTokenLimit, 2000), 2000),
+				SarcasticCondensedModelName:        getEnv(EnvSarcasticCondensedModelName),
+				ChatHistoriesSummarizationLanguage: getEnv(EnvChatHistoriesSummarizationLanguage),
 			},
 			Telegraph: SectionTelegraph{
 				AccessToken: getEnv(EnvTelegraphAccessToken),

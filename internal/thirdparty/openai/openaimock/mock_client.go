@@ -20,6 +20,20 @@ type MockClient struct {
 	getModelNameReturnsOnCall map[int]struct {
 		result1 string
 	}
+	SarcasticCondenseStub        func(context.Context, string) (string, error)
+	sarcasticCondenseMutex       sync.RWMutex
+	sarcasticCondenseArgsForCall []struct {
+		arg1 context.Context
+		arg2 string
+	}
+	sarcasticCondenseReturns struct {
+		result1 string
+		result2 error
+	}
+	sarcasticCondenseReturnsOnCall map[int]struct {
+		result1 string
+		result2 error
+	}
 	SplitContentBasedByTokenLimitationsStub        func(string, int) []string
 	splitContentBasedByTokenLimitationsMutex       sync.RWMutex
 	splitContentBasedByTokenLimitationsArgsForCall []struct {
@@ -46,11 +60,12 @@ type MockClient struct {
 		result1 *openaia.ChatCompletionResponse
 		result2 error
 	}
-	SummarizeChatHistoriesStub        func(context.Context, string) (*openaia.ChatCompletionResponse, error)
+	SummarizeChatHistoriesStub        func(context.Context, string, string) (*openaia.ChatCompletionResponse, error)
 	summarizeChatHistoriesMutex       sync.RWMutex
 	summarizeChatHistoriesArgsForCall []struct {
 		arg1 context.Context
 		arg2 string
+		arg3 string
 	}
 	summarizeChatHistoriesReturns struct {
 		result1 *openaia.ChatCompletionResponse
@@ -157,6 +172,71 @@ func (fake *MockClient) GetModelNameReturnsOnCall(i int, result1 string) {
 	fake.getModelNameReturnsOnCall[i] = struct {
 		result1 string
 	}{result1}
+}
+
+func (fake *MockClient) SarcasticCondense(arg1 context.Context, arg2 string) (string, error) {
+	fake.sarcasticCondenseMutex.Lock()
+	ret, specificReturn := fake.sarcasticCondenseReturnsOnCall[len(fake.sarcasticCondenseArgsForCall)]
+	fake.sarcasticCondenseArgsForCall = append(fake.sarcasticCondenseArgsForCall, struct {
+		arg1 context.Context
+		arg2 string
+	}{arg1, arg2})
+	stub := fake.SarcasticCondenseStub
+	fakeReturns := fake.sarcasticCondenseReturns
+	fake.recordInvocation("SarcasticCondense", []interface{}{arg1, arg2})
+	fake.sarcasticCondenseMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *MockClient) SarcasticCondenseCallCount() int {
+	fake.sarcasticCondenseMutex.RLock()
+	defer fake.sarcasticCondenseMutex.RUnlock()
+	return len(fake.sarcasticCondenseArgsForCall)
+}
+
+func (fake *MockClient) SarcasticCondenseCalls(stub func(context.Context, string) (string, error)) {
+	fake.sarcasticCondenseMutex.Lock()
+	defer fake.sarcasticCondenseMutex.Unlock()
+	fake.SarcasticCondenseStub = stub
+}
+
+func (fake *MockClient) SarcasticCondenseArgsForCall(i int) (context.Context, string) {
+	fake.sarcasticCondenseMutex.RLock()
+	defer fake.sarcasticCondenseMutex.RUnlock()
+	argsForCall := fake.sarcasticCondenseArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *MockClient) SarcasticCondenseReturns(result1 string, result2 error) {
+	fake.sarcasticCondenseMutex.Lock()
+	defer fake.sarcasticCondenseMutex.Unlock()
+	fake.SarcasticCondenseStub = nil
+	fake.sarcasticCondenseReturns = struct {
+		result1 string
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *MockClient) SarcasticCondenseReturnsOnCall(i int, result1 string, result2 error) {
+	fake.sarcasticCondenseMutex.Lock()
+	defer fake.sarcasticCondenseMutex.Unlock()
+	fake.SarcasticCondenseStub = nil
+	if fake.sarcasticCondenseReturnsOnCall == nil {
+		fake.sarcasticCondenseReturnsOnCall = make(map[int]struct {
+			result1 string
+			result2 error
+		})
+	}
+	fake.sarcasticCondenseReturnsOnCall[i] = struct {
+		result1 string
+		result2 error
+	}{result1, result2}
 }
 
 func (fake *MockClient) SplitContentBasedByTokenLimitations(arg1 string, arg2 int) []string {
@@ -286,19 +366,20 @@ func (fake *MockClient) SummarizeAnyReturnsOnCall(i int, result1 *openaia.ChatCo
 	}{result1, result2}
 }
 
-func (fake *MockClient) SummarizeChatHistories(arg1 context.Context, arg2 string) (*openaia.ChatCompletionResponse, error) {
+func (fake *MockClient) SummarizeChatHistories(arg1 context.Context, arg2 string, arg3 string) (*openaia.ChatCompletionResponse, error) {
 	fake.summarizeChatHistoriesMutex.Lock()
 	ret, specificReturn := fake.summarizeChatHistoriesReturnsOnCall[len(fake.summarizeChatHistoriesArgsForCall)]
 	fake.summarizeChatHistoriesArgsForCall = append(fake.summarizeChatHistoriesArgsForCall, struct {
 		arg1 context.Context
 		arg2 string
-	}{arg1, arg2})
+		arg3 string
+	}{arg1, arg2, arg3})
 	stub := fake.SummarizeChatHistoriesStub
 	fakeReturns := fake.summarizeChatHistoriesReturns
-	fake.recordInvocation("SummarizeChatHistories", []interface{}{arg1, arg2})
+	fake.recordInvocation("SummarizeChatHistories", []interface{}{arg1, arg2, arg3})
 	fake.summarizeChatHistoriesMutex.Unlock()
 	if stub != nil {
-		return stub(arg1, arg2)
+		return stub(arg1, arg2, arg3)
 	}
 	if specificReturn {
 		return ret.result1, ret.result2
@@ -312,17 +393,17 @@ func (fake *MockClient) SummarizeChatHistoriesCallCount() int {
 	return len(fake.summarizeChatHistoriesArgsForCall)
 }
 
-func (fake *MockClient) SummarizeChatHistoriesCalls(stub func(context.Context, string) (*openaia.ChatCompletionResponse, error)) {
+func (fake *MockClient) SummarizeChatHistoriesCalls(stub func(context.Context, string, string) (*openaia.ChatCompletionResponse, error)) {
 	fake.summarizeChatHistoriesMutex.Lock()
 	defer fake.summarizeChatHistoriesMutex.Unlock()
 	fake.SummarizeChatHistoriesStub = stub
 }
 
-func (fake *MockClient) SummarizeChatHistoriesArgsForCall(i int) (context.Context, string) {
+func (fake *MockClient) SummarizeChatHistoriesArgsForCall(i int) (context.Context, string, string) {
 	fake.summarizeChatHistoriesMutex.RLock()
 	defer fake.summarizeChatHistoriesMutex.RUnlock()
 	argsForCall := fake.summarizeChatHistoriesArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
 }
 
 func (fake *MockClient) SummarizeChatHistoriesReturns(result1 *openaia.ChatCompletionResponse, result2 error) {
@@ -550,6 +631,8 @@ func (fake *MockClient) Invocations() map[string][][]interface{} {
 	defer fake.invocationsMutex.RUnlock()
 	fake.getModelNameMutex.RLock()
 	defer fake.getModelNameMutex.RUnlock()
+	fake.sarcasticCondenseMutex.RLock()
+	defer fake.sarcasticCondenseMutex.RUnlock()
 	fake.splitContentBasedByTokenLimitationsMutex.RLock()
 	defer fake.splitContentBasedByTokenLimitationsMutex.RUnlock()
 	fake.summarizeAnyMutex.RLock()

@@ -27,7 +27,7 @@ type Client interface {
 	GetModelName() string
 	SplitContentBasedByTokenLimitations(textContent string, limits int) []string
 	SummarizeAny(ctx context.Context, content string) (*openai.ChatCompletionResponse, error)
-	SummarizeChatHistories(ctx context.Context, llmFriendlyChatHistories string) (*openai.ChatCompletionResponse, error)
+	SummarizeChatHistories(ctx context.Context, llmFriendlyChatHistories string, language string) (*openai.ChatCompletionResponse, error)
 	SummarizeOneChatHistory(ctx context.Context, llmFriendlyChatHistory string) (*openai.ChatCompletionResponse, error)
 	SummarizeWithQuestionsAsSimplifiedChinese(ctx context.Context, title string, by string, content string) (*openai.ChatCompletionResponse, error)
 	TruncateContentBasedOnTokens(textContent string, limits int) string
@@ -37,7 +37,9 @@ type Client interface {
 var _ Client = (*OpenAIClient)(nil)
 
 type OpenAIClient struct {
-	modelName string
+	modelName                    string
+	sarcasticCondensedModelName  string
+	defaultSummarizationLanguage string
 
 	tiktokenEncoding            *tiktoken.Tiktoken
 	client                      *openai.Client
@@ -98,13 +100,15 @@ func NewClient(enableMetricRecordForTokens bool) func(NewClientParams) (Client, 
 		limiter.Take()
 
 		return &OpenAIClient{
-			modelName:                   lo.Ternary(params.Config.OpenAI.ModelName == "", openai.GPT3Dot5Turbo, params.Config.OpenAI.ModelName),
-			client:                      client,
-			tiktokenEncoding:            tokenizer,
-			ent:                         params.Ent,
-			logger:                      params.Logger,
-			limiter:                     limiter,
-			enableMetricRecordForTokens: enableMetricRecordForTokens,
+			modelName:                    lo.Ternary(params.Config.OpenAI.ModelName == "", openai.GPT3Dot5Turbo, params.Config.OpenAI.ModelName),
+			sarcasticCondensedModelName:  lo.Ternary(params.Config.OpenAI.SarcasticCondensedModelName == "", lo.Ternary(params.Config.OpenAI.ModelName == "", openai.GPT3Dot5Turbo, params.Config.OpenAI.ModelName), params.Config.OpenAI.SarcasticCondensedModelName),
+			defaultSummarizationLanguage: lo.Ternary(params.Config.OpenAI.ChatHistoriesSummarizationLanguage == "", "Simplified Chinese", params.Config.OpenAI.ChatHistoriesSummarizationLanguage),
+			client:                       client,
+			tiktokenEncoding:             tokenizer,
+			ent:                          params.Ent,
+			logger:                       params.Logger,
+			limiter:                      limiter,
+			enableMetricRecordForTokens:  enableMetricRecordForTokens,
 		}, nil
 	}
 }
@@ -325,8 +329,13 @@ func (c *OpenAIClient) SummarizeAny(ctx context.Context, content string) (*opena
 	return &resp, nil
 }
 
-func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyChatHistories string) (*openai.ChatCompletionResponse, error) {
+func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyChatHistories string, language string) (*openai.ChatCompletionResponse, error) {
 	c.limiter.Take()
+
+	// Use default language if not specified
+	if language == "" {
+		language = c.defaultSummarizationLanguage
+	}
 
 	sb := new(strings.Builder)
 
@@ -334,7 +343,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		sb,
 		NewChatHistorySummarizationPromptInputs(
 			llmFriendlyChatHistories,
-			"Simplified Chinese",
+			language,
 		),
 	)
 	if err != nil {
@@ -414,7 +423,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:       c.modelName,
+			Model:       c.sarcasticCondensedModelName,
 			Messages:    messages,
 			Temperature: 0.7, // 稍微提高溫度以增加創意性
 		},
@@ -434,7 +443,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			SetPromptTokenUsage(resp.Usage.PromptTokens).
 			SetCompletionTokenUsage(resp.Usage.CompletionTokens).
 			SetTotalTokenUsage(resp.Usage.TotalTokens).
-			SetModelName(c.modelName).
+			SetModelName(c.sarcasticCondensedModelName).
 			Exec(ctx)
 		if err != nil {
 			c.logger.Error("failed to record token usage", zap.Error(err))

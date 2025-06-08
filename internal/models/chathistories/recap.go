@@ -74,7 +74,10 @@ func (m *Model) summarizeChatHistoriesSlice(chatID int64, s string) ([]*openai.C
 		zap.String("model_name", m.openAI.GetModelName()),
 	)
 
-	resp, err := m.openAI.SummarizeChatHistories(context.Background(), s)
+	// Use configured language or default to empty string (which will use OpenAI client's default)
+	language := m.config.OpenAI.ChatHistoriesSummarizationLanguage
+
+	resp, err := m.openAI.SummarizeChatHistories(context.Background(), s, language)
 	if err != nil {
 		return nil, goopenai.Usage{}, err
 	}
