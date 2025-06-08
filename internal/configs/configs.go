@@ -1,12 +1,10 @@
 package configs
 
 import (
-	"errors"
 	"log"
 	"os"
 	"strconv"
 
-	"github.com/joho/godotenv"
 	"github.com/nekomeowww/xo"
 	"github.com/samber/lo"
 	goopenai "github.com/sashabaranov/go-openai"
@@ -68,6 +66,11 @@ const (
 	// Telegraph large content paging test
 	EnvTelegraphPagingTestEnabled = "TELEGRAPH_PAGING_TEST_ENABLED"
 	EnvTelegraphPagingTestFile    = "TELEGRAPH_PAGING_TEST_FILE"
+
+	// Sarcastic condensed system prompt
+	EnvSarcasticCondensedSystemPrompt = "SARCASTIC_CONDENSED_SYSTEM_PROMPT"
+	// Sarcastic condensed user prompt
+	EnvSarcasticCondensedUserPrompt = "SARCASTIC_CONDENSED_USER_PROMPT"
 )
 
 type SectionPineconeIndexes struct {
@@ -156,22 +159,17 @@ type Config struct {
 	// Telegraph paging test switch
 	TelegraphPagingTestEnabled bool
 	TelegraphPagingTestFile    string
+
+	// Sarcastic condensed system prompt
+	SarcasticCondensedSystemPrompt string
+	// Sarcastic condensed user prompt
+	SarcasticCondensedUserPrompt string
 }
 
 func NewConfig() func() (*Config, error) {
 	return func() (*Config, error) {
-		envs, err := godotenv.Read()
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-
 		getEnv := func(varName string) string {
-			v, ok := envs[varName]
-			if !ok || v == "" {
-				return os.Getenv(varName)
-			}
-
-			return v
+			return os.Getenv(varName)
 		}
 
 		envLogLevel := getEnv(EnvLogLevel)
@@ -294,11 +292,13 @@ func NewConfig() func() (*Config, error) {
 				ManualRecapRatePerSeconds:      manualRecapRatePerSecondsHardLimit,
 				SummarizeWebpageRatePerSeconds: summarizeWebpageRatePerSecondsHardLimit,
 			},
-			LocalesDir:                 getEnv(EnvLocalesDir),
-			AutoRecapTestChatID:        autoRecapTestChatID,
-			AutoRecapTestEnabled:       autoRecapTestEnabled,
-			TelegraphPagingTestEnabled: getEnv(EnvTelegraphPagingTestEnabled) == "true" || getEnv(EnvTelegraphPagingTestEnabled) == "1",
-			TelegraphPagingTestFile:    getEnv(EnvTelegraphPagingTestFile),
+			LocalesDir:                     getEnv(EnvLocalesDir),
+			AutoRecapTestChatID:            autoRecapTestChatID,
+			AutoRecapTestEnabled:           autoRecapTestEnabled,
+			TelegraphPagingTestEnabled:     getEnv(EnvTelegraphPagingTestEnabled) == "true" || getEnv(EnvTelegraphPagingTestEnabled) == "1",
+			TelegraphPagingTestFile:        getEnv(EnvTelegraphPagingTestFile),
+			SarcasticCondensedSystemPrompt: getEnv(EnvSarcasticCondensedSystemPrompt),
+			SarcasticCondensedUserPrompt:   getEnv(EnvSarcasticCondensedUserPrompt),
 		}, nil
 	}
 }

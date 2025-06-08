@@ -373,7 +373,7 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 		}
 	}
 
-	htmlSummary += "<hr><p><em>由 " + modelName + " 生成</em></p>"
+	htmlSummary += "<hr><p><em>🤖️ 由 " + modelName + " 生成</em></p>"
 
 	// 建立 Telegraph 文章
 	var telegraphURL string
@@ -420,7 +420,7 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 
 	// 準備 Telegram 訊息內容
 	content := fmt.Sprintf(
-		"📝 <b>自動聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap #recap_auto\n🤖️ 由 %s 生成",
+		"📝 <b>自動聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap #recap_auto\n<i>🤖️ 由 %s 生成</i>",
 		telegraphURL,
 		tgbot.EscapeHTMLSymbols(pageTitle),
 		multiPageInfo,

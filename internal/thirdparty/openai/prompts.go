@@ -50,14 +50,28 @@ var SarcasticCondensedSystemPrompt = `你是一位精炼的聊天记录总结员
 总结应语言精练、直击要点。
 请直接给出总结，不要包含任何前言或解释。`
 
-// 銳評式濃縮總結的用戶提示模板
-var SarcasticCondensedUserPrompt = lo.Must(template.New("sarcastic condensed summary prompt").Parse(`以下是一段聊天記錄，請給出你的犀利總結：
+// SetSarcasticCondensedSystemPrompt sets the sarcastic condensed system prompt from config
+func SetSarcasticCondensedSystemPrompt(prompt string) {
+	if prompt != "" {
+		SarcasticCondensedSystemPrompt = prompt
+	}
+}
 
-聊天記錄："""
+// SetSarcasticCondensedUserPrompt sets the sarcastic condensed user prompt from config
+func SetSarcasticCondensedUserPrompt(prompt string) {
+	if prompt != "" {
+		SarcasticCondensedUserPrompt = lo.Must(template.New("sarcastic condensed summary prompt").Parse(prompt))
+	}
+}
+
+// 銳評式濃縮總結的用戶提示模板
+var SarcasticCondensedUserPrompt = lo.Must(template.New("sarcastic condensed summary prompt").Parse(`以下是一段聊天记录，请给出你的总结：
+
+聊天记录："""
 {{ .ChatHistory }}
 """
 
-請直接給出總結，不要加任何解釋。`))
+请直接给出总结，不要加任何解释。`))
 
 var ChatHistorySummarizationSystemPrompt = `You are an expert in summarizing refined outlines from documents and dialogues. Your task is to identify 1-20 distinct discussion topics from chat histories, focusing on key points and maintaining the conversation's essence.
 

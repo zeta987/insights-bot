@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/joho/godotenv"
 	"go.uber.org/fx"
 
 	"github.com/nekomeowww/insights-bot/internal/bots/discord"
@@ -20,9 +21,15 @@ import (
 	"github.com/nekomeowww/insights-bot/internal/services/pprof"
 	"github.com/nekomeowww/insights-bot/internal/services/smr"
 	"github.com/nekomeowww/insights-bot/internal/thirdparty"
+	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai"
 )
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("Warning: .env file not found, continuing with system environment variables.")
+	}
+
 	app := fx.New(fx.Options(
 		fx.Provide(configs.NewConfig()),
 		fx.Options(lib.NewModules()),
@@ -40,6 +47,10 @@ func main() {
 		fx.Invoke(telegram.Run()),
 		fx.Invoke(discord.Run()),
 		fx.Invoke(smr.Run()),
+		fx.Invoke(func(config *configs.Config) {
+			openai.SetSarcasticCondensedSystemPrompt(config.SarcasticCondensedSystemPrompt)
+			openai.SetSarcasticCondensedUserPrompt(config.SarcasticCondensedUserPrompt)
+		}),
 	))
 
 	app.Run()

@@ -799,7 +799,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 
 	// 新增頁腳
 	htmlContent.WriteString("<hr>")
-	htmlContent.WriteString(fmt.Sprintf("<p><em>由 %s 生成</em></p>", h.chatHistories.GetOpenAIModelName()))
+	htmlContent.WriteString(fmt.Sprintf("<p><em>🤖️ 由 %s 生成</em></p>", h.chatHistories.GetOpenAIModelName()))
 
 	// Create Telegraph page with retry mechanism, support multiple pages if needed
 	var telegraphURL string
@@ -892,7 +892,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		}
 	}
 
-	content := fmt.Sprintf("📝 <b>聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap\n🤖️ 由 %s 生成",
+	content := fmt.Sprintf("📝 <b>聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap\n<i>🤖️ 由 %s 生成</i>",
 		telegraphURL,
 		tgbot.EscapeHTMLSymbols(pageTitle),
 		multiPageInfo,

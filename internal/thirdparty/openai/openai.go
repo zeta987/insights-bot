@@ -103,7 +103,7 @@ func NewClient(enableMetricRecordForTokens bool) func(NewClientParams) (Client, 
 			tiktokenEncoding:            tokenizer,
 			ent:                         params.Ent,
 			logger:                      params.Logger,
-			limiter:                     ratelimit.New(5),
+			limiter:                     limiter,
 			enableMetricRecordForTokens: enableMetricRecordForTokens,
 		}, nil
 	}
