@@ -26,11 +26,18 @@ const (
 	EnvDiscordBotPublicKey   = "DISCORD_BOT_PUBLIC_KEY"
 	EnvDiscordBotWebhookPort = "DISCORD_BOT_WEBHOOK_PORT"
 
-	EnvOpenAIAPISecret                       = "OPENAI_API_SECRET" //nolint:gosec
-	EnvOpenAIAPIHost                         = "OPENAI_API_HOST"
-	EnvOpenAIAPIModelName                    = "OPENAI_API_MODEL_NAME"
-	EnvOpenAIAPITokenLimit                   = "OPENAI_API_TOKEN_LIMIT"                      //nolint:gosec
-	EnvOpenAIAPIChatHistoriesRecapTokenLimit = "OPENAI_API_CHAT_HISTORIES_RECAP_TOKEN_LIMIT" //nolint:gosec
+	EnvOpenAIAPISecret                           = "OPENAI_API_SECRET" //nolint:gosec
+	EnvOpenAIAPIHost                             = "OPENAI_API_HOST"
+	EnvOpenAIAPIModelName                        = "OPENAI_API_MODEL_NAME"
+	EnvOpenAIAPIModelNameBackup                  = "OPENAI_API_MODEL_NAME_backup"
+	EnvOpenAIAPITokenLimit                       = "OPENAI_API_TOKEN_LIMIT"                      //nolint:gosec
+	EnvOpenAIAPIChatHistoriesRecapTokenLimit     = "OPENAI_API_CHAT_HISTORIES_RECAP_TOKEN_LIMIT" //nolint:gosec
+	EnvCheckModel                                = "CHECK_MODEL"
+	EnvCheckModelBackup                          = "CHECK_MODEL_backup"
+	EnvOpenAICheckModelForceFailure              = "OPENAI_FORCE_CHECK_MODEL_FAILURE"
+	EnvOpenAIForceInvalidRecapJSONForTest        = "OPENAI_FORCE_INVALID_RECAP_JSON_FOR_TEST"
+	EnvOpenAIForceCondensedPrimaryFailureForTest = "OPENAI_FORCE_CONDENSED_PRIMARY_FAILURE_FOR_TEST"
+	EnvOpenAIVerbosePayloadLogs                  = "OPENAI_VERBOSE_PAYLOAD_LOGS"
 
 	EnvPineconeProjectName          = "PINECONE_PROJECT_NAME"
 	EnvPineconeEnvironment          = "PINECONE_ENVIRONMENT"
@@ -73,6 +80,8 @@ const (
 	EnvSarcasticCondensedUserPrompt = "SARCASTIC_CONDENSED_USER_PROMPT"
 	// Sarcastic condensed model name
 	EnvSarcasticCondensedModelName = "SARCASTIC_CONDENSED_MODEL_NAME"
+	// Sarcastic condensed backup model name
+	EnvSarcasticCondensedModelNameBackup = "SARCASTIC_CONDENSED_MODEL_NAME_backup"
 	// Chat histories summarization language
 	EnvChatHistoriesSummarizationLanguage = "CHAT_HISTORIES_SUMMARIZATION_LANGUAGE"
 )
@@ -127,13 +136,21 @@ type SectionHardLimit struct {
 }
 
 type SectionOpenAI struct {
-	Secret                             string
-	Host                               string
-	ModelName                          string
-	TokenLimit                         int64
-	ChatHistoriesRecapTokenLimit       int64
-	SarcasticCondensedModelName        string
-	ChatHistoriesSummarizationLanguage string
+	Secret                              string
+	Host                                string
+	ModelName                           string
+	ModelNameBackup                     string
+	TokenLimit                          int64
+	ChatHistoriesRecapTokenLimit        int64
+	SarcasticCondensedModelName         string
+	SarcasticCondensedModelNameBackup   string
+	CheckModelName                      string
+	CheckModelNameBackup                string
+	ForceCheckModelFailure              bool
+	ForceInvalidRecapJSONForTest        bool
+	ForceCondensedPrimaryFailureForTest bool
+	EnableVerbosePayloadLogs            bool
+	ChatHistoriesSummarizationLanguage  string
 }
 
 type SectionTelegraph struct {
@@ -256,13 +273,21 @@ func NewConfig() func() (*Config, error) {
 				ClientSecret: getEnv(EnvSlackClientSecret),
 			},
 			OpenAI: SectionOpenAI{
-				Secret:                             getEnv(EnvOpenAIAPISecret),
-				Host:                               getEnv(EnvOpenAIAPIHost),
-				ModelName:                          lo.Ternary(getEnv(EnvOpenAIAPIModelName) == "", goopenai.GPT3Dot5Turbo, getEnv(EnvOpenAIAPIModelName)),
-				TokenLimit:                         lo.Ternary(tokenLimitParseErr == nil, lo.Ternary(tokenLimit != 0, tokenLimit, 4096), 4096),
-				ChatHistoriesRecapTokenLimit:       lo.Ternary(chatHistoriesRecapTokenLimitParseErr == nil, lo.Ternary(chatHistoriesRecapTokenLimit != 0, chatHistoriesRecapTokenLimit, 2000), 2000),
-				SarcasticCondensedModelName:        getEnv(EnvSarcasticCondensedModelName),
-				ChatHistoriesSummarizationLanguage: getEnv(EnvChatHistoriesSummarizationLanguage),
+				Secret:                              getEnv(EnvOpenAIAPISecret),
+				Host:                                getEnv(EnvOpenAIAPIHost),
+				ModelName:                           lo.Ternary(getEnv(EnvOpenAIAPIModelName) == "", goopenai.GPT3Dot5Turbo, getEnv(EnvOpenAIAPIModelName)),
+				ModelNameBackup:                     getEnv(EnvOpenAIAPIModelNameBackup),
+				TokenLimit:                          lo.Ternary(tokenLimitParseErr == nil, lo.Ternary(tokenLimit != 0, tokenLimit, 4096), 4096),
+				ChatHistoriesRecapTokenLimit:        lo.Ternary(chatHistoriesRecapTokenLimitParseErr == nil, lo.Ternary(chatHistoriesRecapTokenLimit != 0, chatHistoriesRecapTokenLimit, 2000), 2000),
+				SarcasticCondensedModelName:         getEnv(EnvSarcasticCondensedModelName),
+				SarcasticCondensedModelNameBackup:   getEnv(EnvSarcasticCondensedModelNameBackup),
+				CheckModelName:                      getEnv(EnvCheckModel),
+				CheckModelNameBackup:                getEnv(EnvCheckModelBackup),
+				ForceCheckModelFailure:              getEnv(EnvOpenAICheckModelForceFailure) == "true" || getEnv(EnvOpenAICheckModelForceFailure) == "1",
+				ForceInvalidRecapJSONForTest:        getEnv(EnvOpenAIForceInvalidRecapJSONForTest) == "true" || getEnv(EnvOpenAIForceInvalidRecapJSONForTest) == "1",
+				ForceCondensedPrimaryFailureForTest: getEnv(EnvOpenAIForceCondensedPrimaryFailureForTest) == "true" || getEnv(EnvOpenAIForceCondensedPrimaryFailureForTest) == "1",
+				EnableVerbosePayloadLogs:            getEnv(EnvOpenAIVerbosePayloadLogs) == "true" || getEnv(EnvOpenAIVerbosePayloadLogs) == "1",
+				ChatHistoriesSummarizationLanguage:  getEnv(EnvChatHistoriesSummarizationLanguage),
 			},
 			Telegraph: SectionTelegraph{
 				AccessToken: getEnv(EnvTelegraphAccessToken),

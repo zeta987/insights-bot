@@ -280,7 +280,7 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 	chatTitle := histories[len(histories)-1].ChatTitle
 
 	// 生成摘要
-	logID, summarizations, err := m.chathistories.SummarizeChatHistories(chatID, chatType, histories)
+	logID, summarizations, recapTrace, err := m.chathistories.SummarizeChatHistories(chatID, chatType, histories)
 	if err != nil {
 		m.logger.Error(fmt.Sprintf("failed to summarize last %d hour chat histories", hours),
 			zap.Int64("chat_id", chatID),
@@ -327,10 +327,8 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 		return
 	}
 
-	modelName := m.chathistories.GetOpenAIModelName()
-
 	// 生成銳評式濃縮總結
-	condensedSummary, err := m.chathistories.GenSarcasticCondensed(chatID, histories)
+	condensedSummary, condensedTrace, err := m.chathistories.GenSarcasticCondensed(chatID, histories)
 	if err != nil || strings.TrimSpace(condensedSummary) == "" {
 		m.logger.Warn("failed to generate sarcastic condensed summary, using fallback",
 			zap.Error(err),
@@ -350,6 +348,11 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 	} else {
 		condensedSummary = strings.TrimSpace(condensedSummary)
 	}
+
+	modelStatusLines := chathistories.BuildModelExecutionStatusLines(condensedTrace, recapTrace)
+	formattedModelStatusLines := strings.Join(lo.Map(modelStatusLines, func(item string, _ int) string {
+		return "<i>" + tgbot.EscapeHTMLSymbols(item) + "</i>"
+	}), "\n")
 
 	// 準備 Telegraph 文章內容
 	pageTitle := fmt.Sprintf("【群組 %s】自動 %d 小時總結", tgbot.EscapeHTMLSymbols(chatTitle), hours)
@@ -373,7 +376,9 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 		}
 	}
 
-	htmlSummary += "<hr><p><em>🤖️ 由 " + modelName + " 生成 分段總結</em></p>"
+	if len(modelStatusLines) > 1 {
+		htmlSummary += "<hr><p><em>" + tgbot.EscapeHTMLSymbols(modelStatusLines[1]) + "</em></p>"
+	}
 
 	// 建立 Telegraph 文章
 	var telegraphURL string
@@ -419,16 +424,14 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 	}
 
 	// 準備 Telegram 訊息內容
-	sarcasticModelName := m.chathistories.GetSarcasticCondensedModelName()
 	content := fmt.Sprintf(
-		"📝 <b>自動聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap #recap_auto\n<i>🤖️ 由 %s 生成 濃縮總結</i>\n<i>🤖️ 由 %s 生成 分段總結</i>",
+		"📝 <b>自動聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap #recap_auto\n%s",
 		telegraphURL,
 		tgbot.EscapeHTMLSymbols(pageTitle),
 		multiPageInfo,
 		tgbot.EscapeHTMLSymbols(condensedSummary),
 		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由于群组不是超级群组（supergroup），因此消息链接引用暂时被禁用了，如果希望使用该功能，请通过短时间内将群组开放为公共群组并还原回私有群组，或通过其他操作将本群组升级为超级群組后，该功能方可恢复正常运作。\n\n", ""),
-		sarcasticModelName,
-		modelName,
+		formattedModelStatusLines,
 	)
 
 	// 發送訊息

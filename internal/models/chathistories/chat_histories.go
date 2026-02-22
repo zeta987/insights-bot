@@ -407,7 +407,7 @@ func (m *Model) decodeMessageIDFromVirtualMessageID(mMessageIDToVirtualMessageID
 	}
 }
 
-func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType, histories []*ent.ChatHistories) (uuid.UUID, []string, error) {
+func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType, histories []*ent.ChatHistories) (uuid.UUID, []string, *openai.RecapExecutionTrace, error) {
 	historiesLLMFriendly := make([]string, 0, len(histories))
 	historiesIncludedMessageIDs := make([]int64, 0)
 
@@ -443,9 +443,9 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 
 	chatHistories := strings.Join(historiesLLMFriendly, "\n")
 
-	summarizations, statusUsage, err := m.summarizeChatHistories(chatID, historiesIncludedMessageIDs, chatHistories)
+	summarizations, statusUsage, recapTrace, err := m.summarizeChatHistories(chatID, historiesIncludedMessageIDs, chatHistories)
 	if err != nil {
-		return uuid.Nil, make([]string, 0), err
+		return uuid.Nil, make([]string, 0), recapTrace, err
 	}
 
 	// reverse virtual message id to real message id
@@ -453,7 +453,20 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 
 	ss, err := m.renderRecapTemplates(chatID, chatType, summarizations)
 	if err != nil {
-		return uuid.Nil, make([]string, 0), err
+		return uuid.Nil, make([]string, 0), recapTrace, err
+	}
+
+	modelName := m.openAI.GetModelName()
+	if recapTrace != nil {
+		if recapTrace.Generation.BackupUsed && recapTrace.Generation.BackupSucceeded {
+			if recapTrace.Generation.BackupUsedModel != "" {
+				modelName = recapTrace.Generation.BackupUsedModel
+			} else if recapTrace.Generation.BackupModel != "" {
+				modelName = recapTrace.Generation.BackupModel
+			}
+		} else if recapTrace.Generation.PrimaryUsedModel != "" {
+			modelName = recapTrace.Generation.PrimaryUsedModel
+		}
 	}
 
 	saved, err := m.ent.LogChatHistoriesRecap.
@@ -466,13 +479,13 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 		SetTotalTokenUsage(statusUsage.TotalTokens).
 		SetFromPlatform(int(FromPlatformTelegram)).
 		SetRecapType(int(RecapTypeForGroup)).
-		SetModelName(m.openAI.GetModelName()).
+		SetModelName(modelName).
 		Save(context.Background())
 	if err != nil {
-		return uuid.Nil, make([]string, 0), err
+		return uuid.Nil, make([]string, 0), recapTrace, err
 	}
 
-	return saved.ID, ss, nil
+	return saved.ID, ss, recapTrace, nil
 }
 
 func (m *Model) GetOpenAIModelName() string {
