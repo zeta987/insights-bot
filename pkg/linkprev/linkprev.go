@@ -21,6 +21,13 @@ var (
 	ErrRequestFailed = errors.New("request failed")
 )
 
+// Previewer defines the interface for generating link previews.
+type Previewer interface {
+	Preview(ctx context.Context, urlStr string) (Meta, error)
+}
+
+var _ Previewer = (*Client)(nil)
+
 type Client struct {
 	reqClient *req.Client
 }

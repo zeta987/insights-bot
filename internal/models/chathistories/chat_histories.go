@@ -46,11 +46,12 @@ type NewModelParams struct {
 
 	Lifecycle fx.Lifecycle
 
-	Config *configs.Config
-	Logger *logger.Logger
-	Ent    *datastore.Ent
-	OpenAI openai.Client
-	Redis  *datastore.Redis
+	Config   *configs.Config
+	Logger   *logger.Logger
+	Ent      *datastore.Ent
+	OpenAI   openai.Client
+	Redis    *datastore.Redis
+	LinkPrev linkprev.Previewer `optional:"true"`
 }
 
 type Model struct {
@@ -58,18 +59,25 @@ type Model struct {
 	logger   *logger.Logger
 	ent      *datastore.Ent
 	openAI   openai.Client
-	linkprev *linkprev.Client
+	linkprev linkprev.Previewer
 	redis    *datastore.Redis
 }
 
 func NewModel() func(NewModelParams) (*Model, error) {
 	return func(param NewModelParams) (*Model, error) {
+		var lp linkprev.Previewer
+		if param.LinkPrev != nil {
+			lp = param.LinkPrev
+		} else {
+			lp = linkprev.NewClient()
+		}
+
 		return &Model{
 			config:   param.Config,
 			logger:   param.Logger,
 			ent:      param.Ent,
 			openAI:   param.OpenAI,
-			linkprev: linkprev.NewClient(),
+			linkprev: lp,
 			redis:    param.Redis,
 		}, nil
 	}

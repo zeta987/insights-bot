@@ -2,6 +2,8 @@ package linkprev
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -9,28 +11,63 @@ import (
 	"github.com/nekomeowww/insights-bot/pkg/opengraph"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPreview(t *testing.T) {
 	t.Run("GeneralWebsite", func(t *testing.T) {
-		meta, err := NewClient().Preview(context.Background(), "https://nolebase.ayaka.io")
-		assert.NoError(t, err)
-		assert.Equal(t, Meta{
-			Title:       "Nólëbase | 记录回忆，知识和畅想的地方",
-			Description: "记录回忆，知识和畅想的地方",
-			Favicon:     "/logo.svg",
-			Author:      "絢香猫, 絢香音",
-			Keywords: []string{
-				"markdown, knowledge-base, 知识库, vitepress, obsidian, notebook, notes, nekomeowww, LittleSound",
-			},
-			OpenGraph: opengraph.OpenGraph{
-				Title:           "Nólëbase",
-				Image:           "https://nolebase.ayaka.io/og.png",
-				Description:     "记录回忆，知识和畅想的地方",
-				SiteName:        "Nólëbase",
-				LocaleAlternate: make([]string, 0),
-			},
-		}, meta)
+		assert := assert.New(t)
+		require := require.New(t)
+
+		const html = `<!DOCTYPE html>
+<html>
+  <head>
+    <title>Nólëbase | 记录回忆，知识和畅想的地方</title>
+    <meta name="description" content="记录回忆，知识和畅想的地方">
+    <link rel="icon" href="/logo.svg">
+    <meta name="author" content="絢香猫, 絢香音">
+    <meta name="keywords" content="markdown, knowledge-base, 知识库, vitepress, obsidian, notebook, notes, nekomeowww, LittleSound">
+    <meta property="og:title" content="Nólëbase">
+    <meta property="og:image" content="https://nolebase.ayaka.io/og.png">
+    <meta property="og:description" content="记录回忆，知识和畅想的地方">
+    <meta property="og:site_name" content="Nólëbase">
+  </head>
+  <body></body>
+</html>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(html))
+		}))
+		defer server.Close()
+
+		meta, err := NewClient().Preview(context.Background(), server.URL)
+		require.NoError(err)
+
+		assert.Equal("Nólëbase | 记录回忆，知识和畅想的地方", meta.Title)
+		assert.Equal("记录回忆，知识和畅想的地方", meta.Description)
+		assert.Equal("/logo.svg", meta.Favicon)
+		assert.Equal("絢香猫, 絢香音", meta.Author)
+		assert.Equal([]string{
+			"markdown, knowledge-base, 知识库, vitepress, obsidian, notebook, notes, nekomeowww, LittleSound",
+		}, meta.Keywords)
+		assert.Equal("Nólëbase", meta.OpenGraph.Title)
+		assert.Equal("https://nolebase.ayaka.io/og.png", meta.OpenGraph.Image)
+		assert.Equal("记录回忆，知识和畅想的地方", meta.OpenGraph.Description)
+		assert.Equal("Nólëbase", meta.OpenGraph.SiteName)
+	})
+
+	t.Run("ErrorOnNon200", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("not found"))
+		}))
+		defer server.Close()
+
+		_, err := NewClient().Preview(context.Background(), server.URL)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrRequestFailed)
 	})
 }
 

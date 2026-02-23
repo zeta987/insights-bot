@@ -2,7 +2,9 @@ package chathistories
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,11 +21,28 @@ import (
 	"github.com/nekomeowww/insights-bot/internal/lib"
 	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai"
 	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai/openaimock"
+	"github.com/nekomeowww/insights-bot/pkg/linkprev"
 	"github.com/nekomeowww/insights-bot/pkg/tutils"
 	"github.com/nekomeowww/xo"
 )
 
-var model *Model
+// mockLinkPreviewer is a hand-written mock that satisfies the linkprev.Previewer interface.
+type mockLinkPreviewer struct {
+	PreviewStub func(ctx context.Context, urlStr string) (linkprev.Meta, error)
+}
+
+func (m *mockLinkPreviewer) Preview(ctx context.Context, urlStr string) (linkprev.Meta, error) {
+	if m.PreviewStub != nil {
+		return m.PreviewStub(ctx, urlStr)
+	}
+
+	return linkprev.Meta{}, nil
+}
+
+var (
+	model        *Model
+	mockLinkPrev *mockLinkPreviewer
+)
 
 func TestMain(m *testing.M) {
 	config := configs.NewTestConfig()()
@@ -50,11 +69,14 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
+	mockLinkPrev = &mockLinkPreviewer{}
+
 	model, err = NewModel()(NewModelParams{
-		Ent:    ent,
-		Logger: logger,
-		OpenAI: &openaimock.MockClient{},
-		Redis:  redis,
+		Ent:      ent,
+		Logger:   logger,
+		OpenAI:   &openaimock.MockClient{},
+		Redis:    redis,
+		LinkPrev: mockLinkPrev,
 	})
 	if err != nil {
 		panic(err)
@@ -91,6 +113,22 @@ func TestExtractTextFromMessage(t *testing.T) {
 			return &goopenai.ChatCompletionResponse{
 				Choices: []goopenai.ChatCompletionChoice{{Message: goopenai.ChatCompletionMessage{Content: "11年前，Go 1发布了。Google Developers Europe呼吁大家庆祝这一天，加入当地见面会和试用Go Playground。如果你和他们一样是一位Gopher，请分享这条推文。"}}},
 			}, nil
+		}
+
+		// Set up deterministic link preview results per URL.
+		mockLinkPrev.PreviewStub = func(ctx context.Context, urlStr string) (linkprev.Meta, error) {
+			switch {
+			case strings.Contains(urlStr, "docs.swift.org"):
+				return linkprev.Meta{Title: "Documentation"}, nil
+			case strings.Contains(urlStr, "youtube.com"):
+				return linkprev.Meta{Title: "GPT-4 Developer Livestream - YouTube"}, nil
+			case strings.Contains(urlStr, "github.com"):
+				return linkprev.Meta{Title: "GitHub - nekomeowww/insights-bot: A bot works with OpenAI GPT models to provide insights for your info flows."}, nil
+			case strings.Contains(urlStr, "twitter.com"):
+				return linkprev.Meta{}, errors.New("twitter preview unavailable")
+			default:
+				return linkprev.Meta{}, errors.New("unknown url")
+			}
 		}
 
 		expect := "看看这些链接：[Documentation](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/stringsandcharacters/#Extended-Grapheme-Clusters) 、[GPT-4 Developer Livestream - YouTube](https://www.youtube.com/watch?v=outcGtbnMuQ) [GitHub - nekomeowww/insights-bot: A bot works with OpenAI GPT models to provide insights for your info flows.](https://github.com/nekomeowww/insights-bot) 还有 [这个](https://matters.town/@1435Club/322889-这几天-web3在大理发生了什么)，和这个 https://twitter.com/GoogleDevEurope/status/1640667303158198272"
