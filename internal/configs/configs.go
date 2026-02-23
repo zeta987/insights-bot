@@ -65,7 +65,7 @@ type SectionPineconeIndexes struct {
 type SectionPinecone struct {
 	ProjectName string
 	Environment string
-	APIKey      string
+	APIKey      string //nolint:gosec // G117 false positive - config struct field, not a credential
 
 	Indexes SectionPineconeIndexes
 }
@@ -73,7 +73,7 @@ type SectionPinecone struct {
 type SectionSlack struct {
 	Port         string
 	ClientID     string
-	ClientSecret string
+	ClientSecret string //nolint:gosec // G117 false positive - config struct field, not a credential
 }
 
 type SectionDiscord struct {
@@ -97,7 +97,7 @@ type SectionRedis struct {
 	Port               string
 	TLSEnabled         bool
 	Username           string
-	Password           string
+	Password           string //nolint:gosec // G117 false positive - config struct field, not a credential
 	DB                 int64
 	ClientCacheEnabled bool
 }
@@ -108,7 +108,7 @@ type SectionHardLimit struct {
 }
 
 type SectionOpenAI struct {
-	Secret                       string
+	Secret                       string //nolint:gosec // G117 false positive - config struct field, not a credential
 	Host                         string
 	ModelName                    string
 	TokenLimit                   int64

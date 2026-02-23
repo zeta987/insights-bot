@@ -26,7 +26,6 @@ func SplitMessagesAgainstLengthLimitIntoMessageGroups(originalSlice []string) []
 			continue
 		}
 
-
 		// If adding the current message would exceed the limit
 		if count+currentLength >= MessageLengthLimit {
 			// Save the current batch
