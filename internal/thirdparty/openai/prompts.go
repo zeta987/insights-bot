@@ -44,6 +44,14 @@ type SarcasticCondensedSummaryInputs struct {
 	ChatHistory string
 }
 
+type CheckSummaryJSONInputs struct {
+	RawJSON string
+}
+
+type CheckCondensedOutputInputs struct {
+	RawOutput string
+}
+
 // 銳評式濃縮總結的系統提示
 var SarcasticCondensedSystemPrompt = `你是一位精炼的聊天记录总结员。
 请将提供的聊天记录，用简体中文总结成一句话的核心内容，并在总结中恰当使用1-2个相关的emoji。
@@ -81,10 +89,40 @@ Please format your response according to the following JSON Schema:
 Example output:
 [{"topicName":"Most Important Topic 1","sinceId":123456789,"participants":["John","Mary"],"discussion":[{"point":"Most relevant key point","keyIds":[123456789,987654321]}],"conclusion":"Optional brief conclusion"},{"topicName":"Most Important Topic 2","sinceId":987654321,"participants":["Bob","Alice"],"discussion":[{"point":"Most relevant key point","keyIds":[987654321]}],"conclusion":"Optional brief conclusion"}]`
 
-var ChatHistorySummarizationUserPrompt = lo.Must(template.New("chat histories summarization prompt").Parse(`Please analyze the following chat history and provide a summary in {{ .Language }}:
+var ChatHistorySummarizationUserPrompt = lo.Must(template.New("chat histories summarization prompt").Parse(`Please summarize the following chat histories into 1-20 topics and return a valid JSON array only.
+The output language should be {{ .Language }}.
 
-Chat histories:"""
+Chat histories:
 {{ .ChatHistory }}
-"""
+`))
 
-Note: Topics may be discussed in parallel, so consider relevant keywords across the chat histories. Be concise and focus on the key essence of each topic.`))
+var CheckSummaryJSONSystemPrompt = `You are a strict JSON repair validator.
+Your task is to output a valid JSON array only.
+The JSON MUST conform to this schema:
+[{"topicName":"string","sinceId":123,"participants":["string"],"discussion":[{"point":"string","keyIds":[123]}],"conclusion":"string"}]
+Rules:
+1) Output valid JSON only.
+2) Do not use markdown fences.
+3) Do not include any explanation text.
+4) Keep original meaning as much as possible.
+5) Ensure each item has non-empty topicName, participants, and discussion.
+6) Ensure each discussion item has non-empty point and keyIds.
+7) If sinceId/keyIds are missing or unknown, use sinceId=1 and keyIds=[1].`
+
+var CheckSummaryJSONUserPrompt = lo.Must(template.New("check summary json prompt").Parse(`Please repair the following JSON payload into a valid JSON array that follows the schema:
+
+{{ .RawJSON }}`))
+
+var CheckCondensedOutputSystemPrompt = `You are a strict output rewriter for condensed summaries.
+Your task is to rewrite the provided text into one natural sentence only.
+Rules:
+1) Output exactly one single-line sentence.
+2) Do not use markdown code fences.
+3) Do not output JSON, arrays, objects, or key-value format.
+4) Do not add explanations or prefixes.
+5) Keep the original meaning as much as possible.
+6) Preserve emoji when appropriate.`
+
+var CheckCondensedOutputUserPrompt = lo.Must(template.New("check condensed output prompt").Parse(`Please rewrite the following invalid condensed summary into one natural sentence:
+
+{{ .RawOutput }}`))

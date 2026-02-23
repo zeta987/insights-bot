@@ -691,7 +691,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
 	}
 	if !lo.Contains(RecapSelectHourAvailable, data.Hour) {
-		return nil, tgbot.NewExceptionError(fmt.Errorf("invalid hour: %d")).WithReply(replyToMessage)
+		return nil, tgbot.NewExceptionError(fmt.Errorf("invalid hour: %d", data.Hour)).WithReply(replyToMessage)
 	}
 
 	var inProgressText string
@@ -738,7 +738,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 
 	chatType := telegram.ChatType(c.Update.CallbackQuery.Message.Chat.Type)
 
-	logID, summarizations, err := h.chatHistories.SummarizeChatHistories(data.ChatID, chatType, histories)
+	logID, summarizations, recapTrace, err := h.chatHistories.SummarizeChatHistories(data.ChatID, chatType, histories)
 	if err != nil {
 		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
 	}
@@ -798,8 +798,11 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 	}
 
 	// 新增頁腳
+	modelStatusLines := chathistories.BuildModelExecutionStatusLines(nil, recapTrace)
 	htmlContent.WriteString("<hr>")
-	htmlContent.WriteString(fmt.Sprintf("<p><em>🤖️ 由 %s 生成 分段總結</em></p>", h.chatHistories.GetOpenAIModelName()))
+	if len(modelStatusLines) > 1 {
+		htmlContent.WriteString(fmt.Sprintf("<p><em>%s</em></p>", tgbot.EscapeHTMLSymbols(modelStatusLines[1])))
+	}
 
 	// Create Telegraph page with retry mechanism, support multiple pages if needed
 	var telegraphURL string
@@ -839,7 +842,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 	}
 
 	// 1. 嘗試使用 OpenAI 生成銳評式濃縮摘要
-	condensedSummary, genErr := h.chatHistories.GenSarcasticCondensed(data.ChatID, histories)
+	condensedSummary, condensedTrace, genErr := h.chatHistories.GenSarcasticCondensed(data.ChatID, histories)
 	if genErr != nil || condensedSummary == "" {
 		// 2. Fallback：採用既有簡單算法
 		condensedSummary = "最近討論的主題包括: "
@@ -880,9 +883,10 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		condensedSummary = strings.TrimSpace(condensedSummary)
 	}
 
-	// Send the link to Telegram
-	modelName := h.chatHistories.GetOpenAIModelName()
-	sarcasticModelName := h.chatHistories.GetSarcasticCondensedModelName()
+	modelStatusLines = chathistories.BuildModelExecutionStatusLines(condensedTrace, recapTrace)
+	formattedModelStatusLines := strings.Join(lo.Map(modelStatusLines, func(item string, _ int) string {
+		return "<i>" + tgbot.EscapeHTMLSymbols(item) + "</i>"
+	}), "\n")
 
 	// 添加多頁信息（如果有多頁）
 	multiPageInfo := ""
@@ -893,14 +897,13 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		}
 	}
 
-	content := fmt.Sprintf("📝 <b>聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap\n<i>🤖️ 由 %s 生成 濃縮總結</i>\n<i>🤖️ 由 %s 生成 分段總結</i>",
+	content := fmt.Sprintf("📝 <b>聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap\n%s",
 		telegraphURL,
 		tgbot.EscapeHTMLSymbols(pageTitle),
 		multiPageInfo,
 		tgbot.EscapeHTMLSymbols(condensedSummary),
 		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由於群組不是超級群組（supergroup），因此消息鏈接引用暫時被禁用了，如果希望使用該功能，請通過短時間內將群組開放為公共群組並還原回私有群組，或通過其他操作將本群組升級為超級群組後，該功能方可恢復正常運作。\n\n", ""),
-		sarcasticModelName,
-		modelName,
+		formattedModelStatusLines,
 	)
 
 	msg := tgbotapi.NewMessage(c.Update.CallbackQuery.Message.Chat.ID, content)

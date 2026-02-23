@@ -5,8 +5,12 @@ package openai
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -38,9 +42,17 @@ type Client interface {
 var _ Client = (*OpenAIClient)(nil)
 
 type OpenAIClient struct {
-	modelName                    string
-	sarcasticCondensedModelName  string
-	defaultSummarizationLanguage string
+	modelName                           string
+	modelNameBackup                     string
+	sarcasticCondensedModelName         string
+	sarcasticCondensedModelBackup       string
+	checkModelName                      string
+	checkModelNameBackup                string
+	forceInvalidRecapJSONForTest        bool
+	forceCondensedPrimaryFailureForTest bool
+	forceCheckModelFailure              bool
+	enableVerbosePayloadLogs            bool
+	defaultSummarizationLanguage        string
 
 	tiktokenEncoding            *tiktoken.Tiktoken
 	client                      *openai.Client
@@ -49,6 +61,10 @@ type OpenAIClient struct {
 	limiter                     ratelimit.Limiter
 	enableMetricRecordForTokens bool
 }
+
+var trailingCommaPattern = regexp.MustCompile(`,\s*([}\]])`)
+
+const forcedInvalidRecapJSONForTestPayload = "```json,\n\n&nbsp;   \"discussion\":\n\n&nbsp;     },\n\n&nbsp;     {\n\n&nbsp;       \"point\": \"The AI requires a dialogue transcript or document to analyze and extract the requested discussion topics.\",\n\n&nbsp;       \"keyIds\":\n\n&nbsp;     }\n\n&nbsp;   ],\n\n&nbsp;   \"conclusion\": \"Please provide the chat history so that I can process it and generate the summarized outline according to your JSON schema.\"\n\n&nbsp; }\n\n]\n\n```"
 
 func parseOpenAIAPIHost(apiHost string) (string, error) {
 	if !strings.HasPrefix(apiHost, "https://") && !strings.HasPrefix(apiHost, "http://") {
@@ -100,16 +116,31 @@ func NewClient(enableMetricRecordForTokens bool) func(NewClientParams) (Client, 
 		limiter := ratelimit.New(1)
 		limiter.Take()
 
+		primaryModel := strings.TrimSpace(lo.Ternary(params.Config.OpenAI.ModelName == "", openai.GPT3Dot5Turbo, params.Config.OpenAI.ModelName))
+		recapBackupModels := normalizeModelList(lo.Ternary(params.Config.OpenAI.ModelNameBackup == "", primaryModel, params.Config.OpenAI.ModelNameBackup))
+		condensedPrimaryModel := strings.TrimSpace(lo.Ternary(params.Config.OpenAI.SarcasticCondensedModelName == "", primaryModel, params.Config.OpenAI.SarcasticCondensedModelName))
+		condensedBackupModels := normalizeModelList(lo.Ternary(params.Config.OpenAI.SarcasticCondensedModelNameBackup == "", condensedPrimaryModel, params.Config.OpenAI.SarcasticCondensedModelNameBackup))
+		checkPrimaryModel := strings.TrimSpace(params.Config.OpenAI.CheckModelName)
+		checkBackupModels := normalizeModelList(params.Config.OpenAI.CheckModelNameBackup)
+
 		return &OpenAIClient{
-			modelName:                    lo.Ternary(params.Config.OpenAI.ModelName == "", openai.GPT3Dot5Turbo, params.Config.OpenAI.ModelName),
-			sarcasticCondensedModelName:  lo.Ternary(params.Config.OpenAI.SarcasticCondensedModelName == "", lo.Ternary(params.Config.OpenAI.ModelName == "", openai.GPT3Dot5Turbo, params.Config.OpenAI.ModelName), params.Config.OpenAI.SarcasticCondensedModelName),
-			defaultSummarizationLanguage: lo.Ternary(params.Config.OpenAI.ChatHistoriesSummarizationLanguage == "", "Simplified Chinese", params.Config.OpenAI.ChatHistoriesSummarizationLanguage),
-			client:                       client,
-			tiktokenEncoding:             tokenizer,
-			ent:                          params.Ent,
-			logger:                       params.Logger,
-			limiter:                      limiter,
-			enableMetricRecordForTokens:  enableMetricRecordForTokens,
+			modelName:                           primaryModel,
+			modelNameBackup:                     recapBackupModels,
+			sarcasticCondensedModelName:         condensedPrimaryModel,
+			sarcasticCondensedModelBackup:       condensedBackupModels,
+			checkModelName:                      checkPrimaryModel,
+			checkModelNameBackup:                checkBackupModels,
+			forceInvalidRecapJSONForTest:        params.Config.OpenAI.ForceInvalidRecapJSONForTest,
+			forceCondensedPrimaryFailureForTest: params.Config.OpenAI.ForceCondensedPrimaryFailureForTest,
+			forceCheckModelFailure:              params.Config.OpenAI.ForceCheckModelFailure,
+			enableVerbosePayloadLogs:            params.Config.OpenAI.EnableVerbosePayloadLogs,
+			defaultSummarizationLanguage:        lo.Ternary(params.Config.OpenAI.ChatHistoriesSummarizationLanguage == "", "Simplified Chinese", params.Config.OpenAI.ChatHistoriesSummarizationLanguage),
+			client:                              client,
+			tiktokenEncoding:                    tokenizer,
+			ent:                                 params.Ent,
+			logger:                              params.Logger,
+			limiter:                             limiter,
+			enableMetricRecordForTokens:         enableMetricRecordForTokens,
 		}, nil
 	}
 }
@@ -120,6 +151,593 @@ func (c *OpenAIClient) GetModelName() string {
 
 func (c *OpenAIClient) GetSarcasticCondensedModelName() string {
 	return c.sarcasticCondensedModelName
+}
+
+func shouldFallbackByError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) {
+		return true
+	}
+
+	return true
+}
+
+func parseModelList(raw string) []string {
+	if raw == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(raw, ",")
+	seen := make(map[string]struct{}, len(parts))
+	models := make([]string, 0, len(parts))
+	for _, part := range parts {
+		model := strings.TrimSpace(part)
+		if model == "" {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+
+	return models
+}
+
+func normalizeModelList(raw string) string {
+	return strings.Join(parseModelList(raw), ", ")
+}
+
+func filterBackupModels(raw string, excludes ...string) []string {
+	excludeSet := make(map[string]struct{}, len(excludes))
+	for _, exclude := range excludes {
+		model := strings.TrimSpace(exclude)
+		if model == "" {
+			continue
+		}
+		excludeSet[model] = struct{}{}
+	}
+
+	filtered := make([]string, 0)
+	for _, model := range parseModelList(raw) {
+		if _, excluded := excludeSet[model]; excluded {
+			continue
+		}
+		filtered = append(filtered, model)
+	}
+
+	return filtered
+}
+
+func (c *OpenAIClient) recapBackupModels() []string {
+	return filterBackupModels(c.modelNameBackup, c.modelName)
+}
+
+func (c *OpenAIClient) condensedBackupModels() []string {
+	return filterBackupModels(c.sarcasticCondensedModelBackup, c.sarcasticCondensedModelName)
+}
+
+func (c *OpenAIClient) checkBackupModels() []string {
+	return filterBackupModels(c.checkModelNameBackup, c.checkModelName)
+}
+
+func cleanJSONResponseContent(content string) string {
+	cleaned := strings.TrimSpace(content)
+	cleaned = strings.TrimPrefix(cleaned, "\ufeff")
+
+	if strings.HasPrefix(cleaned, "```json") {
+		cleaned = strings.TrimPrefix(cleaned, "```json")
+	}
+	if strings.HasPrefix(cleaned, "```JSON") {
+		cleaned = strings.TrimPrefix(cleaned, "```JSON")
+	}
+	if strings.HasPrefix(cleaned, "```") {
+		cleaned = strings.TrimPrefix(cleaned, "```")
+	}
+	cleaned = strings.TrimSpace(cleaned)
+	if strings.HasSuffix(cleaned, "```") {
+		cleaned = strings.TrimSuffix(cleaned, "```")
+	}
+	cleaned = strings.TrimSpace(cleaned)
+	cleaned = strings.ReplaceAll(cleaned, "&nbsp;", " ")
+
+	start := strings.Index(cleaned, "[")
+	end := strings.LastIndex(cleaned, "]")
+	if start >= 0 && end > start {
+		cleaned = cleaned[start : end+1]
+	}
+
+	return strings.TrimSpace(cleaned)
+}
+
+func forceRepairSummaryJSON(content string) string {
+	repaired := cleanJSONResponseContent(content)
+	repaired = trailingCommaPattern.ReplaceAllString(repaired, "$1")
+	repaired = strings.TrimSpace(strings.TrimPrefix(repaired, ","))
+	repaired = strings.TrimSpace(strings.TrimSuffix(repaired, ","))
+
+	return repaired
+}
+
+func validateAndCompactSummaryJSON(content string) (string, error) {
+	candidate := strings.TrimSpace(content)
+	if candidate == "" {
+		return "", errors.New("empty json content")
+	}
+
+	var outputs []*ChatHistorySummarizationOutputs
+	if err := json.Unmarshal([]byte(candidate), &outputs); err != nil {
+		return "", err
+	}
+
+	compact := new(bytes.Buffer)
+	if err := json.Compact(compact, []byte(candidate)); err != nil {
+		return "", err
+	}
+
+	return compact.String(), nil
+}
+
+func normalizeCondensedDisplayText(content string) string {
+	normalized := strings.TrimSpace(content)
+	normalized = strings.ReplaceAll(normalized, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	lines := strings.Split(normalized, "\n")
+	cleanedLines := make([]string, 0, len(lines))
+	previousEmpty := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if previousEmpty {
+				continue
+			}
+			previousEmpty = true
+			cleanedLines = append(cleanedLines, "")
+			continue
+		}
+
+		previousEmpty = false
+		cleanedLines = append(cleanedLines, trimmed)
+	}
+
+	return strings.TrimSpace(strings.Join(cleanedLines, "\n"))
+}
+
+func isJSONLikeCondensedOutput(content string) bool {
+	candidate := strings.TrimSpace(content)
+	if candidate == "" {
+		return false
+	}
+
+	var decoded any
+	if err := json.Unmarshal([]byte(candidate), &decoded); err == nil {
+		switch decoded.(type) {
+		case map[string]any, []any:
+			return true
+		}
+	}
+
+	if strings.HasPrefix(candidate, "{") && strings.HasSuffix(candidate, "}") {
+		return true
+	}
+
+	if strings.HasPrefix(candidate, "[") && strings.HasSuffix(candidate, "]") {
+		return true
+	}
+
+	return false
+}
+
+func invalidCondensedOutputReason(content string) string {
+	candidate := strings.TrimSpace(content)
+	if candidate == "" {
+		return "no content generated"
+	}
+
+	if strings.Contains(candidate, "```") {
+		return "condensed output contains code fence"
+	}
+
+	if isJSONLikeCondensedOutput(candidate) {
+		return "condensed output is json-like"
+	}
+
+	return ""
+}
+
+func normalizeCondensedOutputContent(content string) (string, error) {
+	trimmed := strings.TrimSpace(content)
+	if reason := invalidCondensedOutputReason(trimmed); reason != "" {
+		return "", errors.New(reason)
+	}
+
+	return normalizeCondensedDisplayText(trimmed), nil
+}
+
+func (c *OpenAIClient) callChatCompletionWithModel(
+	ctx context.Context,
+	model string,
+	messages []openai.ChatCompletionMessage,
+	temperature *float32,
+) (openai.ChatCompletionResponse, error) {
+	c.limiter.Take()
+
+	request := openai.ChatCompletionRequest{
+		Model:    model,
+		Messages: messages,
+	}
+	if temperature != nil {
+		request.Temperature = *temperature
+	}
+
+	return c.client.CreateChatCompletion(ctx, request)
+}
+
+func (c *OpenAIClient) logWarn(message string, fields ...zap.Field) {
+	if c.logger == nil {
+		return
+	}
+
+	c.logger.Warn(message, fields...)
+}
+
+func (c *OpenAIClient) logInfo(message string, fields ...zap.Field) {
+	if c.logger == nil {
+		return
+	}
+
+	c.logger.Info(message, fields...)
+}
+
+func (c *OpenAIClient) logChatCompletionPayload(
+	stage string,
+	operation string,
+	model string,
+	body any,
+) {
+	if !c.enableVerbosePayloadLogs {
+		return
+	}
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		c.logWarn("failed to marshal openai payload body for verbose logs",
+			zap.String("stage", stage),
+			zap.String("operation", operation),
+			zap.String("model", model),
+			zap.Error(err),
+		)
+		return
+	}
+
+	c.logInfo("openai verbose payload",
+		zap.String("stage", stage),
+		zap.String("operation", operation),
+		zap.String("model", model),
+		zap.String("body", string(b)),
+	)
+}
+
+func (c *OpenAIClient) logVerboseJSONBody(stage string, content string) {
+	if !c.enableVerbosePayloadLogs {
+		return
+	}
+
+	c.logInfo("openai verbose json content",
+		zap.String("stage", stage),
+		zap.String("content", content),
+	)
+}
+
+func (c *OpenAIClient) callChatCompletionWithModelAndVerboseLog(
+	ctx context.Context,
+	operation string,
+	model string,
+	messages []openai.ChatCompletionMessage,
+	temperature *float32,
+) (openai.ChatCompletionResponse, error) {
+	request := openai.ChatCompletionRequest{
+		Model:    model,
+		Messages: messages,
+	}
+	if temperature != nil {
+		request.Temperature = *temperature
+	}
+
+	c.logChatCompletionPayload("request", operation, model, request)
+
+	resp, err := c.callChatCompletionWithModel(ctx, model, messages, temperature)
+	if err != nil {
+		c.logWarn("openai chat completion call failed",
+			zap.String("operation", operation),
+			zap.String("model", model),
+			zap.Error(err),
+		)
+		return resp, err
+	}
+
+	c.logChatCompletionPayload("response", operation, model, resp)
+
+	return resp, nil
+}
+
+func (c *OpenAIClient) callCheckModelRepairOnce(
+	ctx context.Context,
+	model string,
+	messages []openai.ChatCompletionMessage,
+	operation string,
+) (string, error) {
+	resp, err := c.callChatCompletionWithModelAndVerboseLog(
+		ctx,
+		operation,
+		model,
+		messages,
+		nil,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", errors.New("check model returned empty choices")
+	}
+
+	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
+}
+
+func (c *OpenAIClient) repairSummaryJSONByCheckModel(ctx context.Context, rawJSON string) (string, string, bool, error) {
+	if c.checkModelName == "" {
+		return "", "", false, errors.New("check model is not configured")
+	}
+
+	if c.forceCheckModelFailure {
+		c.logWarn("check model repair forced to fail for local validation",
+			zap.String("check_model", c.checkModelName),
+		)
+		return "", "", false, errors.New("check model forced failure via env switch")
+	}
+
+	sb := new(strings.Builder)
+	if err := CheckSummaryJSONUserPrompt.Execute(sb, CheckSummaryJSONInputs{RawJSON: rawJSON}); err != nil {
+		return "", "", false, err
+	}
+
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: CheckSummaryJSONSystemPrompt,
+		},
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: sb.String(),
+		},
+	}
+	checked, err := c.callCheckModelRepairOnce(
+		ctx,
+		c.checkModelName,
+		messages,
+		"check_model_repair_primary",
+	)
+	if err == nil {
+		return checked, c.checkModelName, false, nil
+	}
+
+	backupModels := c.checkBackupModels()
+	if len(backupModels) == 0 {
+		return "", "", false, err
+	}
+
+	lastErr := err
+	for idx, backupModel := range backupModels {
+		checked, backupErr := c.callCheckModelRepairOnce(
+			ctx,
+			backupModel,
+			messages,
+			fmt.Sprintf("check_model_repair_backup_%d", idx+1),
+		)
+		if backupErr != nil {
+			lastErr = backupErr
+			continue
+		}
+
+		return checked, backupModel, true, nil
+	}
+
+	return "", "", true, lastErr
+}
+
+func (c *OpenAIClient) repairCondensedOutputByCheckModel(ctx context.Context, rawOutput string) (string, string, bool, error) {
+	if c.checkModelName == "" {
+		return "", "", false, errors.New("check model is not configured")
+	}
+
+	if c.forceCheckModelFailure {
+		c.logWarn("check model repair forced to fail for local validation",
+			zap.String("check_model", c.checkModelName),
+		)
+		return "", "", false, errors.New("check model forced failure via env switch")
+	}
+
+	sb := new(strings.Builder)
+	if err := CheckCondensedOutputUserPrompt.Execute(sb, CheckCondensedOutputInputs{RawOutput: rawOutput}); err != nil {
+		return "", "", false, err
+	}
+
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: CheckCondensedOutputSystemPrompt,
+		},
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: sb.String(),
+		},
+	}
+
+	checked, err := c.callCheckModelRepairOnce(
+		ctx,
+		c.checkModelName,
+		messages,
+		"check_model_condensed_repair_primary",
+	)
+	if err == nil {
+		return checked, c.checkModelName, false, nil
+	}
+
+	backupModels := c.checkBackupModels()
+	if len(backupModels) == 0 {
+		return "", "", false, err
+	}
+
+	lastErr := err
+	for idx, backupModel := range backupModels {
+		checked, backupErr := c.callCheckModelRepairOnce(
+			ctx,
+			backupModel,
+			messages,
+			fmt.Sprintf("check_model_condensed_repair_backup_%d", idx+1),
+		)
+		if backupErr != nil {
+			lastErr = backupErr
+			continue
+		}
+
+		return checked, backupModel, true, nil
+	}
+
+	return "", "", true, lastErr
+}
+
+func (c *OpenAIClient) normalizeSummaryJSONContent(ctx context.Context, content string, trace *RecapExecutionTrace) (string, error) {
+	candidate := cleanJSONResponseContent(content)
+	c.logVerboseJSONBody("normalize.raw_candidate", candidate)
+	compacted, rawErr := validateAndCompactSummaryJSON(candidate)
+	if rawErr == nil {
+		c.logVerboseJSONBody("normalize.raw_compacted", compacted)
+		return compacted, nil
+	}
+	c.logWarn("summary json is invalid, trying force repair",
+		zap.Error(rawErr),
+	)
+
+	repaired := forceRepairSummaryJSON(candidate)
+	c.logVerboseJSONBody("normalize.local_repaired", repaired)
+	compacted, repairedErr := validateAndCompactSummaryJSON(repaired)
+	if repairedErr == nil {
+		c.logInfo("summary json fixed by local force repair")
+		c.logVerboseJSONBody("normalize.local_repaired_compacted", compacted)
+		return compacted, nil
+	}
+	c.logWarn("local force repair failed, trying check model",
+		zap.Error(repairedErr),
+		zap.String("check_model", c.checkModelName),
+	)
+
+	if c.checkModelName != "" {
+		if trace != nil {
+			trace.Check.Model = c.checkModelName
+			trace.Check.BackupModel = c.checkModelNameBackup
+			trace.Check.Attempted = true
+		}
+
+		var checkValidationErr error
+
+		checked, checkUsedModel, checkBackupTried, checkErr := c.repairSummaryJSONByCheckModel(ctx, repaired)
+		checkBackupUsed := checkUsedModel != "" && checkUsedModel != c.checkModelName
+		if trace != nil && checkBackupTried {
+			trace.Check.BackupUsed = true
+		}
+		if trace != nil && checkBackupUsed {
+			trace.Check.BackupUsedModel = checkUsedModel
+		}
+
+		if checkErr == nil {
+			c.logInfo("check model returned repaired summary json",
+				zap.String("check_model", checkUsedModel),
+			)
+			c.logVerboseJSONBody("normalize.check_model_raw", checked)
+			checked = cleanJSONResponseContent(checked)
+			c.logVerboseJSONBody("normalize.check_model_cleaned", checked)
+			if compacted, err := validateAndCompactSummaryJSON(checked); err == nil {
+				c.logVerboseJSONBody("normalize.check_model_compacted", compacted)
+				if trace != nil && !trace.Check.Failed {
+					trace.Check.Succeeded = true
+					if checkBackupUsed {
+						trace.Check.BackupSucceeded = true
+					}
+				}
+				return compacted, nil
+			} else {
+				checkValidationErr = err
+			}
+
+			checked = forceRepairSummaryJSON(checked)
+			c.logVerboseJSONBody("normalize.check_model_force_repaired", checked)
+			if compacted, err := validateAndCompactSummaryJSON(checked); err == nil {
+				c.logInfo("summary json fixed after check model + local repair",
+					zap.String("check_model", checkUsedModel),
+				)
+				c.logVerboseJSONBody("normalize.check_model_force_repaired_compacted", compacted)
+				if trace != nil && !trace.Check.Failed {
+					trace.Check.Succeeded = true
+					if checkBackupUsed {
+						trace.Check.BackupSucceeded = true
+					}
+				}
+				return compacted, nil
+			} else {
+				checkValidationErr = err
+			}
+		} else {
+			c.logWarn("check model failed to repair summary json",
+				zap.Error(checkErr),
+				zap.String("check_model", c.checkModelName),
+			)
+			if trace != nil {
+				trace.Check.Failed = true
+				if trace.Check.FailureReason == "" {
+					trace.Check.FailureReason = checkErr.Error()
+				}
+				if checkBackupTried {
+					trace.Check.BackupUsed = true
+					trace.Check.BackupSucceeded = false
+					trace.Check.BackupFailureReason = checkErr.Error()
+				}
+			}
+		}
+
+		if checkErr == nil && checkValidationErr != nil && trace != nil {
+			trace.Check.Failed = true
+			if trace.Check.FailureReason == "" {
+				trace.Check.FailureReason = checkValidationErr.Error()
+			}
+			if checkBackupUsed {
+				trace.Check.BackupSucceeded = false
+				trace.Check.BackupFailureReason = checkValidationErr.Error()
+			}
+		}
+	} else {
+		c.logWarn("check model is not configured, skip check-model repair")
+		if trace != nil {
+			trace.Check.Model = ""
+		}
+	}
+
+	return "", fmt.Errorf("failed to normalize summary json")
 }
 
 // truncateContentBasedOnTokens 基于 token 计算的方式截断文本。
@@ -181,7 +799,7 @@ func (c *OpenAIClient) SummarizeWithQuestionsAsSimplifiedChinese(ctx context.Con
 						"3. 最后，你将利用你已有的知识和经验，对我提供的文章信息提出 3 个具有创造性和发散思维的问题" +
 						"4. 请用简体中文进行回复" +
 						"最终你回复的消息格式应像这个例句一样（例句中的双花括号为需要替换的内容）：\n" +
-						"{{简体中文标题，可省略}}\n\n摘要：{{文章的摘要}}\n\n关联提问：\n1. {{关联提问 1}}\n2. {{关联提问 2}}\n2. {{关联提问 3}}",
+						"{{简体中文标题，可省略}}\n\n摘要：{{文章的摘要}}\n\n关联提问：\n1. {{关联提问 1}}\n2. {{关联提问 2}}\n3. {{关联提问 3}}",
 				},
 				{
 					Role: openai.ChatMessageRoleUser,
@@ -335,9 +953,14 @@ func (c *OpenAIClient) SummarizeAny(ctx context.Context, content string) (*opena
 }
 
 func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyChatHistories string, language string) (*openai.ChatCompletionResponse, error) {
-	c.limiter.Take()
+	trace := recapExecutionTraceFromContext(ctx)
+	if trace != nil {
+		trace.Generation.PrimaryModel = c.modelName
+		trace.Generation.BackupModel = c.modelNameBackup
+		trace.Check.Model = c.checkModelName
+		trace.Check.BackupModel = c.checkModelNameBackup
+	}
 
-	// Use default language if not specified
 	if language == "" {
 		language = c.defaultSummarizationLanguage
 	}
@@ -355,24 +978,208 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		return nil, err
 	}
 
-	resp, err := c.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model: c.modelName,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleSystem,
-					Content: ChatHistorySummarizationSystemPrompt,
-				},
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: sb.String(),
-				},
-			},
+	messages := []openai.ChatCompletionMessage{
+		{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: ChatHistorySummarizationSystemPrompt,
 		},
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: sb.String(),
+		},
+	}
+
+	tryRecapBackupModels := func(operationPrefix string, normalize bool) (openai.ChatCompletionResponse, string, string, error) {
+		var lastErr error
+		for idx, backupModel := range c.recapBackupModels() {
+			backupResp, backupErr := c.callChatCompletionWithModelAndVerboseLog(
+				ctx,
+				fmt.Sprintf("%s_%d", operationPrefix, idx+1),
+				backupModel,
+				messages,
+				nil,
+			)
+			if backupErr != nil {
+				lastErr = backupErr
+				continue
+			}
+			if len(backupResp.Choices) == 0 || strings.TrimSpace(backupResp.Choices[0].Message.Content) == "" {
+				lastErr = errors.New("backup model returned empty recap content")
+				continue
+			}
+
+			if normalize {
+				normalizedContent, normalizeErr := c.normalizeSummaryJSONContent(ctx, backupResp.Choices[0].Message.Content, trace)
+				if normalizeErr != nil {
+					lastErr = normalizeErr
+					continue
+				}
+				backupResp.Choices[0].Message.Content = normalizedContent
+			}
+
+			usedModel := backupModel
+			if backupResp.Model != "" {
+				usedModel = backupResp.Model
+			}
+
+			return backupResp, backupModel, usedModel, nil
+		}
+
+		if lastErr == nil {
+			lastErr = errors.New("all backup recap models failed")
+		}
+		return openai.ChatCompletionResponse{}, "", "", lastErr
+	}
+
+	usedModel := c.modelName
+
+	resp, err := c.callChatCompletionWithModelAndVerboseLog(
+		ctx,
+		"recap_primary",
+		c.modelName,
+		messages,
+		nil,
 	)
 	if err != nil {
-		return nil, err
+		if shouldFallbackByError(err) && len(c.recapBackupModels()) > 0 {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = err.Error()
+				trace.Generation.BackupUsed = true
+			}
+
+			c.logger.Warn("primary model failed, switching to backup model for recap",
+				zap.String("primary_model", c.modelName),
+				zap.String("backup_models", c.modelNameBackup),
+				zap.Error(err),
+			)
+
+			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_primary_error", true)
+			if backupErr != nil {
+				if trace != nil {
+					trace.Generation.BackupSucceeded = false
+					trace.Generation.BackupFailureReason = backupErr.Error()
+				}
+				return nil, backupErr
+			}
+
+			resp = backupResp
+			usedModel = backupUsedModel
+			if trace != nil {
+				trace.Generation.BackupSucceeded = true
+				trace.Generation.BackupUsedModel = backupRequestedModel
+			}
+		} else {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = err.Error()
+			}
+			return nil, err
+		}
+	}
+
+	if resp.Model != "" {
+		usedModel = resp.Model
+	}
+	if trace != nil {
+		if !trace.Generation.BackupUsed {
+			trace.Generation.PrimaryUsedModel = usedModel
+		}
+	}
+	c.logVerboseJSONBody("recap.raw_model_output", lo.Ternary(len(resp.Choices) > 0, resp.Choices[0].Message.Content, ""))
+
+	if c.forceInvalidRecapJSONForTest && len(resp.Choices) > 0 {
+		c.logWarn("force invalid recap json test mode is enabled, overriding model output",
+			zap.String("used_model", usedModel),
+		)
+		resp.Choices[0].Message.Content = forcedInvalidRecapJSONForTestPayload
+		c.logVerboseJSONBody("recap.forced_invalid_output", resp.Choices[0].Message.Content)
+	}
+
+	if len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
+		if len(c.recapBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = "primary model returned empty recap content"
+				trace.Generation.BackupUsed = true
+			}
+
+			c.logger.Warn("primary model returned empty recap content, retrying with backup model",
+				zap.String("primary_model", c.modelName),
+				zap.String("backup_models", c.modelNameBackup),
+			)
+
+			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_empty_content", true)
+			if backupErr != nil {
+				if trace != nil {
+					trace.Generation.BackupSucceeded = false
+					trace.Generation.BackupFailureReason = backupErr.Error()
+				}
+				return nil, backupErr
+			}
+
+			resp = backupResp
+			usedModel = backupUsedModel
+			if trace != nil {
+				trace.Generation.BackupSucceeded = true
+				trace.Generation.BackupUsedModel = backupRequestedModel
+			}
+		} else {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = "primary model returned empty recap content"
+			}
+			return nil, errors.New("primary model returned empty recap content")
+		}
+	}
+
+	if len(resp.Choices) != 0 && strings.TrimSpace(resp.Choices[0].Message.Content) != "" {
+		normalizedContent, normalizeErr := c.normalizeSummaryJSONContent(ctx, resp.Choices[0].Message.Content, trace)
+		if normalizeErr != nil {
+			if len(c.recapBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
+				if trace != nil {
+					trace.Generation.PrimaryFailed = true
+					trace.Generation.PrimaryFailureReason = normalizeErr.Error()
+					trace.Generation.BackupUsed = true
+				}
+
+				c.logger.Warn("failed to normalize summary json on primary model, retrying backup model",
+					zap.String("primary_model", c.modelName),
+					zap.String("backup_models", c.modelNameBackup),
+					zap.String("used_model", usedModel),
+					zap.Error(normalizeErr),
+				)
+
+				backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_normalize_failure", true)
+				if backupErr != nil {
+					if trace != nil {
+						trace.Generation.BackupSucceeded = false
+						trace.Generation.BackupFailureReason = backupErr.Error()
+					}
+					return nil, backupErr
+				}
+
+				resp = backupResp
+				usedModel = backupUsedModel
+				if trace != nil {
+					trace.Generation.BackupSucceeded = true
+					trace.Generation.BackupUsedModel = backupRequestedModel
+				}
+			} else {
+				if trace != nil {
+					trace.Generation.PrimaryFailed = true
+					trace.Generation.PrimaryFailureReason = normalizeErr.Error()
+				}
+				return nil, normalizeErr
+			}
+		} else {
+			resp.Choices[0].Message.Content = normalizedContent
+			c.logVerboseJSONBody("recap.normalized_output", normalizedContent)
+		}
+	}
+
+	if trace != nil && trace.Generation.PrimaryUsedModel == "" && !trace.Generation.BackupUsed {
+		trace.Generation.PrimaryUsedModel = usedModel
 	}
 
 	if c.enableMetricRecordForTokens {
@@ -382,7 +1189,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 			SetPromptTokenUsage(resp.Usage.PromptTokens).
 			SetCompletionTokenUsage(resp.Usage.CompletionTokens).
 			SetTotalTokenUsage(resp.Usage.TotalTokens).
-			SetModelName(c.modelName).
+			SetModelName(usedModel).
 			Exec(ctx)
 		if err != nil {
 			c.logger.Error("failed to create metric openai chat completion token usage",
@@ -391,7 +1198,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				zap.Int("prompt_token_usage", resp.Usage.PromptTokens),
 				zap.Int("completion_token_usage", resp.Usage.CompletionTokens),
 				zap.Int("total_token_usage", resp.Usage.TotalTokens),
-				zap.String("model_name", c.modelName),
+				zap.String("model_name", usedModel),
 			)
 		}
 	}
@@ -400,6 +1207,12 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 }
 
 func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string) (string, error) {
+	trace := condensedExecutionTraceFromContext(ctx)
+	if trace != nil {
+		trace.Generation.PrimaryModel = c.sarcasticCondensedModelName
+		trace.Generation.BackupModel = c.sarcasticCondensedModelBackup
+	}
+
 	if chatHistory == "" {
 		return "", nil
 	}
@@ -412,8 +1225,6 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 		return "", err
 	}
 
-	c.limiter.Take()
-
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    openai.ChatMessageRoleSystem,
@@ -425,20 +1236,320 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 		},
 	}
 
-	resp, err := c.client.CreateChatCompletion(
+	temperature := float32(0.7)
+	usedModel := c.sarcasticCondensedModelName
+	tryRepairInvalidCondensedOutput := func(rawOutput string) (string, bool, error) {
+		if strings.TrimSpace(rawOutput) == "" || c.checkModelName == "" {
+			return "", false, nil
+		}
+
+		checked, checkUsedModel, checkBackupTried, checkErr := c.repairCondensedOutputByCheckModel(ctx, rawOutput)
+		if checkErr != nil {
+			c.logWarn("check model failed to repair condensed output",
+				zap.Error(checkErr),
+				zap.String("check_model", c.checkModelName),
+			)
+			return "", true, checkErr
+		}
+
+		normalized, normalizeErr := normalizeCondensedOutputContent(checked)
+		if normalizeErr != nil {
+			c.logWarn("check model repaired condensed output is still invalid",
+				zap.Error(normalizeErr),
+				zap.String("check_model", checkUsedModel),
+			)
+			return "", true, normalizeErr
+		}
+
+		c.logInfo("check model repaired condensed output",
+			zap.String("check_model", checkUsedModel),
+			zap.Bool("check_backup_used", checkBackupTried),
+		)
+
+		return normalized, true, nil
+	}
+
+	tryCondensedBackupModels := func() (openai.ChatCompletionResponse, string, string, string, error) {
+		var lastErr error
+		var lastInvalidOutput string
+		var lastInvalidResp openai.ChatCompletionResponse
+		var lastInvalidRequestedModel string
+		var lastInvalidUsedModel string
+
+		for _, backupModel := range c.condensedBackupModels() {
+			backupResp, backupErr := c.callChatCompletionWithModel(
+				ctx,
+				backupModel,
+				messages,
+				&temperature,
+			)
+			if backupErr != nil {
+				lastErr = backupErr
+				continue
+			}
+			if len(backupResp.Choices) == 0 || strings.TrimSpace(backupResp.Choices[0].Message.Content) == "" {
+				lastErr = errors.New("no content generated from backup model")
+				continue
+			}
+
+			normalizedContent, normalizeErr := normalizeCondensedOutputContent(backupResp.Choices[0].Message.Content)
+			if normalizeErr != nil {
+				usedBackupModel := backupModel
+				if backupResp.Model != "" {
+					usedBackupModel = backupResp.Model
+				}
+
+				lastErr = normalizeErr
+				lastInvalidOutput = backupResp.Choices[0].Message.Content
+				lastInvalidResp = backupResp
+				lastInvalidRequestedModel = backupModel
+				lastInvalidUsedModel = usedBackupModel
+
+				c.logger.Warn("backup model generated invalid condensed output",
+					zap.String("backup_model", backupModel),
+					zap.String("used_model", usedBackupModel),
+					zap.Error(normalizeErr),
+				)
+				continue
+			}
+
+			backupResp.Choices[0].Message.Content = normalizedContent
+			usedBackupModel := backupModel
+			if backupResp.Model != "" {
+				usedBackupModel = backupResp.Model
+			}
+
+			return backupResp, backupModel, usedBackupModel, "", nil
+		}
+
+		if lastErr == nil {
+			lastErr = errors.New("all backup condensed models failed")
+		}
+
+		if strings.TrimSpace(lastInvalidOutput) != "" {
+			return lastInvalidResp, lastInvalidRequestedModel, lastInvalidUsedModel, lastInvalidOutput, lastErr
+		}
+
+		return openai.ChatCompletionResponse{}, "", "", "", lastErr
+	}
+
+	resp, err := c.callChatCompletionWithModel(
 		ctx,
-		openai.ChatCompletionRequest{
-			Model:       c.sarcasticCondensedModelName,
-			Messages:    messages,
-			Temperature: 0.7, // 稍微提高溫度以增加創意性
-		},
+		c.sarcasticCondensedModelName,
+		messages,
+		&temperature,
 	)
 	if err != nil {
-		return "", err
+		if shouldFallbackByError(err) && len(c.condensedBackupModels()) > 0 {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = err.Error()
+				trace.Generation.BackupUsed = true
+			}
+
+			c.logger.Warn("primary model failed, switching to backup model for sarcastic condense",
+				zap.String("primary_model", c.sarcasticCondensedModelName),
+				zap.String("backup_models", c.sarcasticCondensedModelBackup),
+				zap.Error(err),
+			)
+
+			backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+			if backupErr != nil {
+				if trace != nil {
+					trace.Generation.BackupSucceeded = false
+					trace.Generation.BackupFailureReason = backupErr.Error()
+					if backupRequestedModel != "" {
+						trace.Generation.BackupUsedModel = backupRequestedModel
+					}
+				}
+
+				if strings.TrimSpace(backupInvalidOutput) != "" {
+					resp = backupResp
+					usedModel = backupUsedModel
+				} else {
+					return "", backupErr
+				}
+			}
+
+			if backupErr == nil {
+				resp = backupResp
+				usedModel = backupUsedModel
+				if trace != nil {
+					trace.Generation.BackupSucceeded = true
+					trace.Generation.BackupUsedModel = backupRequestedModel
+				}
+			}
+		} else {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = err.Error()
+			}
+			return "", err
+		}
+	}
+
+	if c.forceCondensedPrimaryFailureForTest &&
+		len(c.condensedBackupModels()) > 0 &&
+		(trace == nil || !trace.Generation.BackupUsed) {
+		forcedErr := errors.New("forced condensed primary failure via env switch")
+		c.logger.Warn("force condensed primary failure test mode is enabled, switching to backup model",
+			zap.String("primary_model", c.sarcasticCondensedModelName),
+			zap.String("backup_models", c.sarcasticCondensedModelBackup),
+		)
+
+		if trace != nil {
+			trace.Generation.PrimaryFailed = true
+			trace.Generation.PrimaryFailureReason = forcedErr.Error()
+			trace.Generation.BackupUsed = true
+		}
+
+		backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+		if backupErr != nil {
+			if trace != nil {
+				trace.Generation.BackupSucceeded = false
+				trace.Generation.BackupFailureReason = backupErr.Error()
+				if backupRequestedModel != "" {
+					trace.Generation.BackupUsedModel = backupRequestedModel
+				}
+			}
+
+			if strings.TrimSpace(backupInvalidOutput) != "" {
+				resp = backupResp
+				usedModel = backupUsedModel
+			} else {
+				return "", backupErr
+			}
+		}
+
+		if backupErr == nil {
+			resp = backupResp
+			usedModel = backupUsedModel
+			if trace != nil {
+				trace.Generation.BackupSucceeded = true
+				trace.Generation.BackupUsedModel = backupRequestedModel
+			}
+		}
+	}
+
+	if resp.Model != "" {
+		usedModel = resp.Model
+	}
+	if trace != nil && !trace.Generation.BackupUsed {
+		trace.Generation.PrimaryUsedModel = usedModel
 	}
 
 	if len(resp.Choices) == 0 || resp.Choices[0].Message.Content == "" {
-		return "", fmt.Errorf("no content generated")
+		if len(c.condensedBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = "no content generated from primary model"
+				trace.Generation.BackupUsed = true
+			}
+
+			backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+			if backupErr != nil {
+				if trace != nil {
+					trace.Generation.BackupSucceeded = false
+					trace.Generation.BackupFailureReason = backupErr.Error()
+					if backupRequestedModel != "" {
+						trace.Generation.BackupUsedModel = backupRequestedModel
+					}
+				}
+
+				if strings.TrimSpace(backupInvalidOutput) != "" {
+					resp = backupResp
+					usedModel = backupUsedModel
+				} else {
+					return "", backupErr
+				}
+			}
+
+			if backupErr == nil {
+				resp = backupResp
+				usedModel = backupUsedModel
+				if trace != nil {
+					trace.Generation.BackupSucceeded = true
+					trace.Generation.BackupUsedModel = backupRequestedModel
+				}
+			}
+		} else {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = "no content generated from primary model"
+			}
+			return "", fmt.Errorf("no content generated")
+		}
+	}
+
+	var invalidOutputForRepair string
+	normalizedContent, normalizeErr := normalizeCondensedOutputContent(resp.Choices[0].Message.Content)
+	if normalizeErr == nil {
+		resp.Choices[0].Message.Content = normalizedContent
+	} else {
+		invalidOutputForRepair = resp.Choices[0].Message.Content
+		c.logger.Warn("condensed output is invalid",
+			zap.String("used_model", usedModel),
+			zap.Error(normalizeErr),
+		)
+
+		if len(c.condensedBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
+			if trace != nil {
+				trace.Generation.PrimaryFailed = true
+				trace.Generation.PrimaryFailureReason = normalizeErr.Error()
+				trace.Generation.BackupUsed = true
+			}
+
+			c.logger.Warn("primary model generated invalid condensed output, retrying with backup model",
+				zap.String("primary_model", c.sarcasticCondensedModelName),
+				zap.String("backup_models", c.sarcasticCondensedModelBackup),
+				zap.String("used_model", usedModel),
+				zap.Error(normalizeErr),
+			)
+
+			backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+			if backupErr == nil {
+				resp = backupResp
+				usedModel = backupUsedModel
+				if trace != nil {
+					trace.Generation.BackupSucceeded = true
+					trace.Generation.BackupUsedModel = backupRequestedModel
+				}
+				normalizeErr = nil
+			} else {
+				if trace != nil {
+					trace.Generation.BackupSucceeded = false
+					trace.Generation.BackupFailureReason = backupErr.Error()
+					if backupRequestedModel != "" {
+						trace.Generation.BackupUsedModel = backupRequestedModel
+					}
+				}
+				if strings.TrimSpace(backupInvalidOutput) != "" {
+					invalidOutputForRepair = backupInvalidOutput
+					resp = backupResp
+					usedModel = backupUsedModel
+				}
+			}
+		}
+
+		if normalizeErr != nil {
+			repairedOutput, attempted, repairErr := tryRepairInvalidCondensedOutput(invalidOutputForRepair)
+			if attempted {
+				if repairErr != nil {
+					return "", repairErr
+				}
+
+				resp.Choices[0].Message.Content = repairedOutput
+				normalizeErr = nil
+			}
+		}
+
+		if normalizeErr != nil {
+			return "", normalizeErr
+		}
+	}
+
+	if trace != nil && trace.Generation.PrimaryUsedModel == "" && !trace.Generation.BackupUsed {
+		trace.Generation.PrimaryUsedModel = usedModel
 	}
 
 	if c.enableMetricRecordForTokens {
@@ -448,7 +1559,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			SetPromptTokenUsage(resp.Usage.PromptTokens).
 			SetCompletionTokenUsage(resp.Usage.CompletionTokens).
 			SetTotalTokenUsage(resp.Usage.TotalTokens).
-			SetModelName(c.sarcasticCondensedModelName).
+			SetModelName(usedModel).
 			Exec(ctx)
 		if err != nil {
 			c.logger.Error("failed to record token usage", zap.Error(err))

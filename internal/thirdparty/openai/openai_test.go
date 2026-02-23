@@ -1,16 +1,27 @@
 package openai
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nekomeowww/insights-bot/internal/configs"
 	"github.com/nekomeowww/insights-bot/internal/datastore"
 	"github.com/nekomeowww/insights-bot/internal/lib"
 	"github.com/nekomeowww/insights-bot/pkg/tutils"
+	goopenai "github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/ratelimit"
 )
 
 var client *OpenAIClient
@@ -110,4 +121,113 @@ func TestSplitContentBasedOnTokenLimitations(t *testing.T) {
 			require.Equal(t, table.expected, actual)
 		})
 	}
+}
+
+func TestShouldFallbackByError(t *testing.T) {
+	require.True(t, shouldFallbackByError(errors.New("mock error")))
+	require.False(t, shouldFallbackByError(context.Canceled))
+}
+
+func TestForceRepairSummaryJSON(t *testing.T) {
+	raw := "```json\n[\n  {\n    \"topicName\": \"Topic\",\n    \"sinceId\": 1,\n    \"participants\": [\"insights-bot\"],\n    \"discussion\": [\n      {\n        \"point\": \"P\",\n        \"keyIds\": [1,],\n      }\n    ],\n    \"conclusion\": \"C\",\n  },\n]\n```"
+
+	repaired := forceRepairSummaryJSON(raw)
+	_, err := validateAndCompactSummaryJSON(repaired)
+	require.NoError(t, err)
+}
+
+func TestNewClientBackupModelDefaults(t *testing.T) {
+	logger, err := lib.NewLogger()(lib.NewLoggerParams{
+		Configs: configs.NewTestConfig()(),
+	})
+	require.NoError(t, err)
+
+	ent, err := datastore.NewEnt()(datastore.NewEntParams{
+		Lifecycle: tutils.NewEmtpyLifecycle(),
+		Configs:   configs.NewTestConfig()(),
+	})
+	require.NoError(t, err)
+
+	c, err := NewClient(false)(NewClientParams{
+		Logger: logger,
+		Config: &configs.Config{
+			OpenAI: configs.SectionOpenAI{
+				ModelName:                   "primary-model",
+				ModelNameBackup:             "",
+				SarcasticCondensedModelName: "",
+			},
+		},
+		Ent: ent,
+	})
+	require.NoError(t, err)
+
+	impl, ok := c.(*OpenAIClient)
+	require.True(t, ok)
+	require.Equal(t, "primary-model", impl.modelName)
+	require.Equal(t, "primary-model", impl.modelNameBackup)
+	require.Equal(t, "primary-model", impl.sarcasticCondensedModelName)
+	require.Equal(t, "primary-model", impl.sarcasticCondensedModelBackup)
+}
+
+func readBuildFixture(t *testing.T, fileName string) string {
+	t.Helper()
+
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "build", fileName))
+	require.NoError(t, err)
+
+	return string(content)
+}
+
+func TestNormalizeSummaryJSONContentFromBuildValidFixture(t *testing.T) {
+	raw := readBuildFixture(t, "g3.1p合法json範本.json")
+
+	normalized, err := client.normalizeSummaryJSONContent(context.Background(), raw, nil)
+	require.NoError(t, err)
+	require.True(t, json.Valid([]byte(normalized)))
+
+	var outputs []*ChatHistorySummarizationOutputs
+	require.NoError(t, json.Unmarshal([]byte(normalized), &outputs))
+	require.NotEmpty(t, outputs)
+}
+
+func TestNormalizeSummaryJSONContentFromBuildInvalidFixtureByCheckModel(t *testing.T) {
+	rawInvalid := readBuildFixture(t, "g3.1p不合法json範本.json")
+	rawValid := readBuildFixture(t, "g3.1p合法json範本.json")
+
+	var callCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/v1/chat/completions", request.URL.Path)
+		atomic.AddInt32(&callCount, 1)
+
+		body, err := io.ReadAll(request.Body)
+		require.NoError(t, err)
+		require.Contains(t, string(body), `"model":"check-model"`)
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, err = writer.Write([]byte(fmt.Sprintf(
+			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":"check-model","choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+			rawValid,
+		)))
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+
+	checkClient := &OpenAIClient{
+		checkModelName: "check-model",
+		client:         goopenai.NewClientWithConfig(config),
+		limiter:        ratelimit.New(1000),
+	}
+
+	normalized, err := checkClient.normalizeSummaryJSONContent(context.Background(), rawInvalid, nil)
+	require.NoError(t, err)
+	require.True(t, json.Valid([]byte(normalized)))
+	require.Greater(t, atomic.LoadInt32(&callCount), int32(0))
+
+	var outputs []*ChatHistorySummarizationOutputs
+	require.NoError(t, json.Unmarshal([]byte(normalized), &outputs))
+	require.NotEmpty(t, outputs)
 }
