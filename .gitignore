@@ -77,3 +77,4 @@ temp/
 .agent/
 .cursor/
 openspec/
+.agents/
