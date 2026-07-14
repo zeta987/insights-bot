@@ -44,7 +44,7 @@ A bot works with OpenAI GPT models to provide insights for your info flows.
 
 This fork delivers chat recaps as native Telegram Rich Messages, built on Telegram Bot API 10.1 (released 2026-06-11) and rendered by Telegram Desktop 6.9 series clients. Recaps show up directly in the chat as a single richly formatted message instead of an external Telegraph page.
 
-- v0.1.0 — 2026-07-14 — First fork release: native Rich Message recaps with citation links and model trace footer, sarcastic condensed summaries with backup model chains, conditional CHECK_MODEL repair, configurable summary language, and removal of the Telegraph integration.
+- v1.0.0 — 2026-07-14 — First fork release: native Rich Message recaps with citation links and model trace footer, sarcastic condensed summaries with backup model chains, conditional CHECK_MODEL repair, configurable summary language, and removal of the Telegraph integration.
 
 See [CHANGELOG.md](./CHANGELOG.md) for details.
 
