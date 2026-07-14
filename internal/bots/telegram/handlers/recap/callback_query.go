@@ -728,17 +728,9 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		groupName = "當前聊天"
 	}
 	condensedSummary, condensedTrace, genErr := h.chatHistories.GenSarcasticCondensed(data.ChatID, histories)
+	condensedSummary = strings.TrimSpace(condensedSummary)
 	if genErr != nil || condensedSummary == "" {
-		runes := []rune(strings.TrimSpace(strings.Join(summarizations, " ")))
-		if len(runes) > 120 {
-			runes = runes[:120]
-		}
-		condensedSummary = strings.TrimSpace(string(runes))
-		if condensedSummary == "" {
-			condensedSummary = fmt.Sprintf("過去 %d 小時的群組聊天回顧", data.Hour)
-		}
-	} else {
-		condensedSummary = strings.TrimSpace(condensedSummary)
+		condensedSummary = chathistories.FallbackCondensedSummary(summarizations, fmt.Sprintf("過去 %d 小時的群組聊天回顧", data.Hour))
 	}
 
 	visibleSummary := chathistories.BuildRichRecapSummary(chathistories.RichRecapSummaryConfig{
