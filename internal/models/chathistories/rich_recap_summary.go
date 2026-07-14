@@ -73,7 +73,9 @@ func cleanCondensedSummaryForDisplay(summary string) string {
 	return cleaned
 }
 
-const condensedSummaryFallbackRuneLimit = 120
+// condensedSummaryFallbackUnitLimit caps the derived condensed summary,
+// measured in UTF-16 code units like every Telegram-facing length limit.
+const condensedSummaryFallbackUnitLimit = 120
 
 // FallbackCondensedSummary derives a condensed summary from the detailed
 // summarizations when sarcastic condensed generation fails. The joined text is
@@ -81,7 +83,7 @@ const condensedSummaryFallbackRuneLimit = 120
 // defaultSummary is used when nothing readable remains.
 func FallbackCondensedSummary(summarizations []string, defaultSummary string) string {
 	joined := strings.TrimSpace(strings.Join(summarizations, " "))
-	head, _ := splitRichMarkdownFragment(joined, condensedSummaryFallbackRuneLimit)
+	head, _ := splitFragmentAtPreferredCut(joined, condensedSummaryFallbackUnitLimit, richMarkdownProtectedSpanPatterns)
 
 	head = strings.TrimSpace(head)
 	if head == "" {

@@ -3,34 +3,12 @@ package recapdelivery
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	"github.com/nekomeowww/insights-bot/internal/models/chathistories"
 	"github.com/nekomeowww/insights-bot/pkg/bots/tgbot"
-)
-
-// PlainTextLimit is Telegram's sendMessage text limit, measured in UTF-16
-// code units as the Bot API counts message length.
-const PlainTextLimit = 4096
-
-var (
-	detailsOpenPattern      = regexp.MustCompile(`(?i)<details>\s*<summary>([^<]*)</summary>\s*`)
-	markdownLinkPattern     = regexp.MustCompile(`\[([^\]\r\n]+)\]\((https?://[^)\s]+)\)`)
-	telegramUserLinkPattern = regexp.MustCompile(`\[((?:\\.|[^\]\r\n])*)\]\(tg://user\?id=\d+\)`)
-	markdownHeadingPattern  = regexp.MustCompile(`(?m)^#{1,6}[ \t]+`)
-	markdownQuotePattern    = regexp.MustCompile(`(?m)^[ \t]*>[ \t]?`)
-	plainCitationPattern    = regexp.MustCompile(`\S+[ \t]+\(https?://[^)\s]+\)`)
-	markdownInlinePatterns  = []*regexp.Regexp{
-		regexp.MustCompile(`\*\*((?:\\.|[^*\r\n])*)\*\*`),
-		regexp.MustCompile(`__((?:\\.|[^_\r\n])*)__`),
-		regexp.MustCompile(`~~((?:\\.|[^~\r\n])*)~~`),
-		regexp.MustCompile("`([^`\\r\\n]*)`"),
-		regexp.MustCompile(`\*((?:\\.|[^*\r\n])*)\*`),
-		regexp.MustCompile(`_((?:\\.|[^_\r\n])*)_`),
-	}
 )
 
 // Sender is the Telegram surface needed to deliver a rich recap and its
@@ -92,7 +70,7 @@ func SendRichRecapParts(sender Sender, config Config) ([]tgbotapi.Message, error
 			plainMode = true
 		}
 
-		plainParts := splitPlainText(richMarkdownToPlainText(part))
+		plainParts := chathistories.SplitPlainText(chathistories.RichMarkdownToPlainText(part), tgbot.MessageLengthLimit)
 		if len(plainParts) == 0 {
 			if fallbackErr != nil {
 				return messages, fmt.Errorf("rich recap part %d has no plain-text fallback: %w", index+1, fallbackErr)
@@ -101,7 +79,7 @@ func SendRichRecapParts(sender Sender, config Config) ([]tgbotapi.Message, error
 		}
 		for plainIndex, plainPart := range plainParts {
 			withMarkup := index == 0 && plainIndex == 0
-			if err := sendPlainRecapPart(sender, config, &messages, plainPart, PlainTextLimit, withMarkup, index, plainIndex); err != nil {
+			if err := sendPlainRecapPart(sender, config, &messages, plainPart, tgbot.MessageLengthLimit, withMarkup, index, plainIndex); err != nil {
 				return messages, err
 			}
 		}
@@ -143,7 +121,7 @@ func sendPlainRecapPart(
 		return fmt.Errorf("send plain recap fallback part %d.%d: %w", partIndex+1, plainIndex+1, sendErr)
 	}
 
-	pieces := splitPlainTextWithLimit(text, halvedLimit)
+	pieces := chathistories.SplitPlainText(text, halvedLimit)
 	if len(pieces) < 2 {
 		return fmt.Errorf("send plain recap fallback part %d.%d: %w", partIndex+1, plainIndex+1, sendErr)
 	}
@@ -237,102 +215,4 @@ func isRichMessageFormattingError(err error) bool {
 		}
 	}
 	return false
-}
-
-func richMarkdownToPlainText(markdown string) string {
-	plain := strings.ReplaceAll(markdown, "\r\n", "\n")
-	plain = detailsOpenPattern.ReplaceAllString(plain, "$1\n\n")
-	plain = strings.ReplaceAll(plain, "</details>", "")
-	plain = telegramUserLinkPattern.ReplaceAllString(plain, "$1")
-	plain = markdownLinkPattern.ReplaceAllString(plain, "$1 ($2)")
-	plain = markdownHeadingPattern.ReplaceAllString(plain, "")
-	plain = markdownQuotePattern.ReplaceAllString(plain, "")
-	plain = strings.ReplaceAll(plain, "```", "")
-	plain = strings.ReplaceAll(plain, "~~~", "")
-	for _, pattern := range markdownInlinePatterns {
-		plain = pattern.ReplaceAllString(plain, "$1")
-	}
-	plain = unescapeRichMarkdownText(plain)
-	return strings.TrimSpace(plain)
-}
-
-func unescapeRichMarkdownText(text string) string {
-	runes := []rune(text)
-	var builder strings.Builder
-	builder.Grow(len(text))
-
-	for index := 0; index < len(runes); index++ {
-		if runes[index] == '\\' && index+1 < len(runes) &&
-			strings.ContainsRune("\\*_{}[]()#+-.!|><~`", runes[index+1]) {
-			index++
-		}
-		builder.WriteRune(runes[index])
-	}
-
-	return builder.String()
-}
-
-func splitPlainText(text string) []string {
-	return splitPlainTextWithLimit(text, PlainTextLimit)
-}
-
-func splitPlainTextWithLimit(text string, limit int) []string {
-	text = strings.TrimSpace(text)
-	if text == "" || limit <= 0 {
-		return []string{}
-	}
-
-	parts := make([]string, 0, tgbot.MessageLengthInUTF16Units(text)/limit+1)
-	remaining := []rune(text)
-	for {
-		runeLimit := tgbot.RuneCountWithinUTF16Units(remaining, limit)
-		if runeLimit >= len(remaining) {
-			break
-		}
-		if runeLimit < 1 {
-			// Never stall on a single rune wider than the remaining budget.
-			runeLimit = 1
-		}
-
-		cut := preferredPlainTextCut(remaining, runeLimit)
-		part := strings.TrimSpace(string(remaining[:cut]))
-		if part != "" {
-			parts = append(parts, part)
-		}
-		remaining = []rune(strings.TrimSpace(string(remaining[cut:])))
-	}
-	if tail := strings.TrimSpace(string(remaining)); tail != "" {
-		parts = append(parts, tail)
-	}
-
-	return parts
-}
-
-func preferredPlainTextCut(runes []rune, limit int) int {
-	cut := limit
-	for index := limit - 1; index >= limit/2; index-- {
-		switch runes[index] {
-		case '\n', ' ', '\t', '。', '！', '？', '；':
-			cut = index + 1
-			index = -1
-		}
-	}
-
-	adjusted := adjustCutBeforePattern(string(runes), cut, plainCitationPattern)
-	if adjusted > 0 {
-		return adjusted
-	}
-	return cut
-}
-
-func adjustCutBeforePattern(text string, cut int, pattern *regexp.Regexp) int {
-	adjusted := cut
-	for _, match := range pattern.FindAllStringIndex(text, -1) {
-		start := utf8.RuneCountInString(text[:match[0]])
-		end := start + utf8.RuneCountInString(text[match[0]:match[1]])
-		if start < adjusted && adjusted < end && start > 0 {
-			adjusted = start
-		}
-	}
-	return adjusted
 }

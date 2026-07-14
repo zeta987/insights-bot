@@ -301,11 +301,36 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 
 	limiter := ratelimit.New(5)
 	targetChats := make([]targetChat, 0, len(subscribers)+1)
+
+	// 回顧內容只隨訂閱提示分成兩種變體，先各組裝一次再發送給所有目標
+	buildRecapParts := func(subscriptionChatTitle string) []string {
+		visibleSummary := chathistories.BuildRichRecapSummary(chathistories.RichRecapSummaryConfig{
+			Title:                 chatTitle,
+			Hours:                 hours,
+			Automatic:             true,
+			CondensedSummary:      condensedSummary,
+			GeneralGroupNotice:    chatType == telegram.ChatTypeGroup,
+			SubscriptionChatTitle: subscriptionChatTitle,
+			CondensedTrace:        condensedTrace,
+			RecapTrace:            recapTrace,
+		})
+
+		return chathistories.ComposeRichRecapMessages(visibleSummary, summarizations)
+	}
+
+	var publicParts, subscriberParts []string
+
 	if tgchat.AutoRecapSendMode(options.AutoRecapSendMode) == tgchat.AutoRecapSendModePublicly {
+		publicParts = buildRecapParts("")
+
 		targetChats = append(targetChats, targetChat{
 			chatID:              chatID,
 			isPrivateSubscriber: false,
 		})
+	}
+
+	if len(subscribers) > 0 {
+		subscriberParts = buildRecapParts(chatTitle)
 	}
 
 	for _, subscriber := range subscribers {
@@ -322,9 +347,7 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 			zap.Int64("sending_target_chat_id", targetChat.chatID))
 
 		targetKeyboard := inlineKeyboardMarkup
-		subscriptionChatTitle := ""
 		if targetChat.isPrivateSubscriber {
-			subscriptionChatTitle = chatTitle
 			targetKeyboard, err = m.chathistories.NewVoteRecapWithUnsubscribeInlineKeyboardMarkup(
 				m.botService.Bot(), chatID, chatTitle, targetChat.chatID, logID,
 				counts.UpVotes, counts.DownVotes, counts.Lmao)
@@ -338,17 +361,11 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 			}
 		}
 
-		visibleSummary := chathistories.BuildRichRecapSummary(chathistories.RichRecapSummaryConfig{
-			Title:                 chatTitle,
-			Hours:                 hours,
-			Automatic:             true,
-			CondensedSummary:      condensedSummary,
-			GeneralGroupNotice:    chatType == telegram.ChatTypeGroup,
-			SubscriptionChatTitle: subscriptionChatTitle,
-			CondensedTrace:        condensedTrace,
-			RecapTrace:            recapTrace,
-		})
-		parts := chathistories.ComposeRichRecapMessages(visibleSummary, summarizations)
+		parts := publicParts
+		if targetChat.isPrivateSubscriber {
+			parts = subscriberParts
+		}
+
 		if len(parts) == 0 {
 			m.logger.Error("rich recap composer returned no messages", zap.Int64("chat_id", chatID))
 			continue

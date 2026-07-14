@@ -255,7 +255,7 @@ func TestSendRichRecapPartsResplitsPlainFallbackWhenTelegramReportsTooLong(t *te
 	require.Len(t, messages, 2)
 	assert.Equal(t, text, sender.plain[0].Text)
 	for _, config := range sender.plain[1:] {
-		assert.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), PlainTextLimit/2)
+		assert.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), tgbot.MessageLengthLimit/2)
 	}
 	assert.Equal(t, text, sender.plain[1].Text+sender.plain[2].Text)
 	assert.Equal(t, messages[0].MessageID, sender.plain[2].ReplyToMessageID)
@@ -277,28 +277,6 @@ func TestSendRichRecapPartsDoesNotResplitPlainFallbackForOtherErrors(t *testing.
 	require.Len(t, sender.plain, 1)
 }
 
-func TestSplitPlainTextMeasuresLimitInUTF16CodeUnits(t *testing.T) {
-	// 🧾 is one rune but two UTF-16 code units: rune counting keeps all of
-	// them in one chunk that Telegram rejects as too long.
-	text := strings.Repeat("🧾", PlainTextLimit/2+1)
-
-	parts := splitPlainText(text)
-
-	require.Len(t, parts, 2)
-	for _, part := range parts {
-		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(part), PlainTextLimit)
-	}
-	require.Equal(t, text, strings.Join(parts, ""))
-}
-
-func TestSplitPlainTextKeepsExactUTF16BoundaryInOnePart(t *testing.T) {
-	text := strings.Repeat("🧾", PlainTextLimit/2)
-
-	parts := splitPlainText(text)
-
-	require.Equal(t, []string{text}, parts)
-}
-
 func TestSendRichRecapPartsSplitsPlainTextFallbackAndRepliesToFirstMessage(t *testing.T) {
 	sender := &fakeSender{
 		richErrors: []error{&tgbotapi.Error{
@@ -306,14 +284,14 @@ func TestSendRichRecapPartsSplitsPlainTextFallbackAndRepliesToFirstMessage(t *te
 			Message: "Bad Request: invalid rich message markdown",
 		}},
 	}
-	rich := "<details><summary>詳細總結</summary>\n\n" + strings.Repeat("界", PlainTextLimit+10) + "\n\n</details>"
+	rich := "<details><summary>詳細總結</summary>\n\n" + strings.Repeat("界", tgbot.MessageLengthLimit+10) + "\n\n</details>"
 
 	messages, err := SendRichRecapParts(sender, Config{ChatID: 123, Parts: []string{rich}})
 	require.NoError(t, err)
 	require.Len(t, sender.plain, 2)
 	assert.Len(t, messages, 2)
 	for _, config := range sender.plain {
-		assert.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), PlainTextLimit)
+		assert.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), tgbot.MessageLengthLimit)
 	}
 	assert.Zero(t, sender.plain[0].ReplyToMessageID)
 	assert.Equal(t, messages[0].MessageID, sender.plain[1].ReplyToMessageID)
@@ -365,7 +343,7 @@ func TestRichRecapSummaryFallsBackToCompleteSegmentedPlainText(t *testing.T) {
 	plainTexts := make([]string, 0, len(sender.plain))
 	for index, config := range sender.plain {
 		plainTexts = append(plainTexts, config.Text)
-		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), PlainTextLimit)
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), tgbot.MessageLengthLimit)
 		if index == 0 {
 			require.Equal(t, keyboard, config.ReplyMarkup)
 			require.Equal(t, 9, config.ReplyToMessageID)
@@ -383,23 +361,4 @@ func TestRichRecapSummaryFallsBackToCompleteSegmentedPlainText(t *testing.T) {
 	require.Contains(t, plain, "Check：checkModel")
 	require.NotContains(t, plain, "> ")
 	require.Contains(t, plain, "1 (https://t.me/c/123/45)")
-}
-
-func TestSplitPlainTextKeepsCitationLabelAndURLTogether(t *testing.T) {
-	citation := "1 (https://t.me/c/123/456)"
-	text := strings.Repeat("a", PlainTextLimit-10) + " " + citation
-
-	parts := splitPlainText(text)
-	require.Len(t, parts, 2)
-	assert.NotContains(t, parts[0], "https://")
-	assert.Equal(t, citation, parts[1])
-	for _, part := range parts {
-		assert.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(part), PlainTextLimit)
-	}
-}
-
-func TestRichMarkdownToPlainTextKeepsTelegramUserLabelWithoutTarget(t *testing.T) {
-	rich := "# 🧾 聊天回顧\n\n_用戶 [TestUser](tg://user?id=42) 發起 **1 小時**總結_"
-
-	require.Equal(t, "🧾 聊天回顧\n\n用戶 TestUser 發起 1 小時總結", richMarkdownToPlainText(rich))
 }
