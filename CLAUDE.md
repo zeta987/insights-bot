@@ -142,3 +142,17 @@ SARCASTIC_CONDENSED_MODEL_NAME=  # Optional: for sarcastic mode
 - Enable pprof server for performance profiling
 - Use structured logging with appropriate log levels
 - Check health endpoint at `:7069/` for service status
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues for `zeta987/insights-bot`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical triage roles use the same-named GitHub labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses a single-context domain documentation layout. See `docs/agents/domain.md`.
