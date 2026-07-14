@@ -12,7 +12,8 @@ import (
 	"github.com/nekomeowww/insights-bot/pkg/bots/tgbot"
 )
 
-// PlainTextLimit is Telegram's sendMessage text limit.
+// PlainTextLimit is Telegram's sendMessage text limit, measured in UTF-16
+// code units as the Bot API counts message length.
 const PlainTextLimit = 4096
 
 var (
@@ -51,14 +52,15 @@ type Config struct {
 }
 
 // SendRichRecapParts sends every Rich Markdown part and replies continuation
-// parts to the first delivered message. Telegram formatting-specific 400
-// errors fall back to split plain text; transport and server errors do not.
+// parts to the first delivered message. Telegram formatting-specific and
+// message-too-long 400 errors fall back to split plain text; transport and
+// server errors do not.
 func SendRichRecapParts(sender Sender, config Config) ([]tgbotapi.Message, error) {
 	messages := make([]tgbotapi.Message, 0, len(config.Parts))
 	plainMode := false
 
 	for index, part := range config.Parts {
-		var formattingErr error
+		var fallbackErr error
 		if !plainMode {
 			replyToMessageID := continuationReplyID(messages, config.ReplyToMessageID)
 			richConfig := tgbot.RichMessageConfig{
@@ -82,40 +84,77 @@ func SendRichRecapParts(sender Sender, config Config) ([]tgbotapi.Message, error
 				messages = append(messages, message)
 				continue
 			}
-			if !isRichMessageFormattingError(err) {
+			if !isRichMessageFormattingError(err) && !isMessageTooLongError(err) {
 				return messages, fmt.Errorf("send rich recap part %d: %w", index+1, err)
 			}
 
-			formattingErr = err
+			fallbackErr = err
 			plainMode = true
 		}
 
 		plainParts := splitPlainText(richMarkdownToPlainText(part))
 		if len(plainParts) == 0 {
-			if formattingErr != nil {
-				return messages, fmt.Errorf("rich recap part %d has no plain-text fallback: %w", index+1, formattingErr)
+			if fallbackErr != nil {
+				return messages, fmt.Errorf("rich recap part %d has no plain-text fallback: %w", index+1, fallbackErr)
 			}
 			return messages, fmt.Errorf("rich recap part %d has no plain-text fallback", index+1)
 		}
 		for plainIndex, plainPart := range plainParts {
-			plainMessage := tgbotapi.NewMessage(config.ChatID, plainPart)
-			plainMessage.DisableNotification = config.DisableNotification
-			plainMessage.AllowSendingWithoutReply = config.AllowSendingWithoutReply
-			plainMessage.ReplyToMessageID = continuationReplyID(messages, config.ReplyToMessageID)
-			if index == 0 && plainIndex == 0 && config.ReplyMarkup != nil {
-				plainMessage.ReplyMarkup = *config.ReplyMarkup
+			withMarkup := index == 0 && plainIndex == 0
+			if err := sendPlainRecapPart(sender, config, &messages, plainPart, PlainTextLimit, withMarkup, index, plainIndex); err != nil {
+				return messages, err
 			}
-
-			invokeBeforeSend(config.BeforeSend)
-			sent, sendErr := sender.Send(plainMessage)
-			if sendErr != nil {
-				return messages, fmt.Errorf("send plain recap fallback part %d.%d: %w", index+1, plainIndex+1, sendErr)
-			}
-			messages = append(messages, sent)
 		}
 	}
 
 	return messages, nil
+}
+
+// sendPlainRecapPart delivers one plain-text chunk. When Telegram still
+// rejects the chunk as too long, the chunk is re-split with a halved UTF-16
+// budget and each piece is retried.
+func sendPlainRecapPart(
+	sender Sender,
+	config Config,
+	messages *[]tgbotapi.Message,
+	text string,
+	limit int,
+	withMarkup bool,
+	partIndex int,
+	plainIndex int,
+) error {
+	plainMessage := tgbotapi.NewMessage(config.ChatID, text)
+	plainMessage.DisableNotification = config.DisableNotification
+	plainMessage.AllowSendingWithoutReply = config.AllowSendingWithoutReply
+	plainMessage.ReplyToMessageID = continuationReplyID(*messages, config.ReplyToMessageID)
+	if withMarkup && config.ReplyMarkup != nil {
+		plainMessage.ReplyMarkup = *config.ReplyMarkup
+	}
+
+	invokeBeforeSend(config.BeforeSend)
+	sent, sendErr := sender.Send(plainMessage)
+	if sendErr == nil {
+		*messages = append(*messages, sent)
+		return nil
+	}
+
+	halvedLimit := limit / 2
+	if !isMessageTooLongError(sendErr) || halvedLimit < 1 {
+		return fmt.Errorf("send plain recap fallback part %d.%d: %w", partIndex+1, plainIndex+1, sendErr)
+	}
+
+	pieces := splitPlainTextWithLimit(text, halvedLimit)
+	if len(pieces) < 2 {
+		return fmt.Errorf("send plain recap fallback part %d.%d: %w", partIndex+1, plainIndex+1, sendErr)
+	}
+	for pieceIndex, piece := range pieces {
+		err := sendPlainRecapPart(sender, config, messages, piece, halvedLimit, withMarkup && pieceIndex == 0, partIndex, plainIndex)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func invokeBeforeSend(beforeSend func()) {
@@ -131,6 +170,15 @@ func continuationReplyID(messages []tgbotapi.Message, initialReplyID int) int {
 	return initialReplyID
 }
 
+func isMessageTooLongError(err error) bool {
+	var telegramError *tgbotapi.Error
+	if !errors.As(err, &telegramError) || telegramError.Code != 400 {
+		return false
+	}
+
+	return strings.Contains(strings.ToLower(telegramError.Message), "message is too long")
+}
+
 func isRichMessageFormattingError(err error) bool {
 	var telegramError *tgbotapi.Error
 	if !errors.As(err, &telegramError) || telegramError.Code != 400 {
@@ -138,14 +186,29 @@ func isRichMessageFormattingError(err error) bool {
 	}
 
 	message := strings.ToLower(telegramError.Message)
+	// Parse failures that point at request payload fields (for example
+	// reply_markup JSON) are application bugs; degrading them to plain text
+	// would hide the defect instead of surfacing it.
+	for _, payloadSignature := range []string{
+		"reply markup",
+		"reply_markup",
+		"reply parameters",
+		"reply_parameters",
+	} {
+		if strings.Contains(message, payloadSignature) {
+			return false
+		}
+	}
+
 	for _, signature := range []string{
 		"can't parse entities",
 		"cannot parse entities",
-		"failed to parse",
-		"parse error",
 		"can't find end of the entity",
 		"unsupported start tag",
-		"markdown",
+		"can't parse markdown",
+		"cannot parse markdown",
+		"failed to parse markdown",
+		"invalid markdown",
 	} {
 		if strings.Contains(message, signature) {
 			return true
@@ -210,15 +273,28 @@ func unescapeRichMarkdownText(text string) string {
 }
 
 func splitPlainText(text string) []string {
+	return splitPlainTextWithLimit(text, PlainTextLimit)
+}
+
+func splitPlainTextWithLimit(text string, limit int) []string {
 	text = strings.TrimSpace(text)
-	if text == "" {
+	if text == "" || limit <= 0 {
 		return []string{}
 	}
 
-	parts := make([]string, 0, utf8.RuneCountInString(text)/PlainTextLimit+1)
+	parts := make([]string, 0, tgbot.MessageLengthInUTF16Units(text)/limit+1)
 	remaining := []rune(text)
-	for len(remaining) > PlainTextLimit {
-		cut := preferredPlainTextCut(remaining, PlainTextLimit)
+	for {
+		runeLimit := tgbot.RuneCountWithinUTF16Units(remaining, limit)
+		if runeLimit >= len(remaining) {
+			break
+		}
+		if runeLimit < 1 {
+			// Never stall on a single rune wider than the remaining budget.
+			runeLimit = 1
+		}
+
+		cut := preferredPlainTextCut(remaining, runeLimit)
 		part := strings.TrimSpace(string(remaining[:cut]))
 		if part != "" {
 			parts = append(parts, part)
