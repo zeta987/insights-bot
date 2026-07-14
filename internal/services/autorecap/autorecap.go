@@ -3,7 +3,6 @@ package autorecap
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -21,49 +20,13 @@ import (
 	"github.com/nekomeowww/insights-bot/internal/datastore"
 	"github.com/nekomeowww/insights-bot/internal/models/chathistories"
 	"github.com/nekomeowww/insights-bot/internal/models/tgchats"
-	TelegraphService "github.com/nekomeowww/insights-bot/internal/services/telegraph"
+	"github.com/nekomeowww/insights-bot/internal/services/recapdelivery"
 	"github.com/nekomeowww/insights-bot/pkg/bots/tgbot"
 	"github.com/nekomeowww/insights-bot/pkg/logger"
 	"github.com/nekomeowww/insights-bot/pkg/types/telegram"
 	"github.com/nekomeowww/insights-bot/pkg/types/tgchat"
 	"github.com/nekomeowww/insights-bot/pkg/types/timecapsules"
 )
-
-func formatToHTML(text string) string {
-	var html strings.Builder
-	inBold := false
-	inItalic := false
-
-	for i := 0; i < len(text); i++ {
-		char := text[i]
-		switch char {
-		case '*':
-			if inBold {
-				html.WriteString("</b>")
-			} else {
-				html.WriteString("<b>")
-			}
-			inBold = !inBold
-		case '_':
-			if inItalic {
-				html.WriteString("</i>")
-			} else {
-				html.WriteString("<i>")
-			}
-			inItalic = !inItalic
-		default:
-			html.WriteByte(char)
-		}
-	}
-	// Close any unclosed tags
-	if inBold {
-		html.WriteString("</b>")
-	}
-	if inItalic {
-		html.WriteString("</i>")
-	}
-	return html.String()
-}
 
 type NewAutoRecapParams struct {
 	fx.In
@@ -75,7 +38,6 @@ type NewAutoRecapParams struct {
 	ChatHistories *chathistories.Model
 	TgChats       *tgchats.Model
 	Digger        *datastore.AutoRecapTimeCapsuleDigger
-	Telegraph     *TelegraphService.Service
 	Config        *configsPkg.Config
 }
 
@@ -85,10 +47,9 @@ type AutoRecapService struct {
 	chathistories *chathistories.Model
 	tgchats       *tgchats.Model
 
-	digger    *datastore.AutoRecapTimeCapsuleDigger
-	telegraph *TelegraphService.Service
-	started   bool
-	Config    *configsPkg.Config
+	digger  *datastore.AutoRecapTimeCapsuleDigger
+	started bool
+	Config  *configsPkg.Config
 }
 
 type targetChat struct {
@@ -104,7 +65,6 @@ func NewAutoRecapService() func(NewAutoRecapParams) (*AutoRecapService, error) {
 			chathistories: params.ChatHistories,
 			tgchats:       params.TgChats,
 			digger:        params.Digger,
-			telegraph:     params.Telegraph,
 			Config:        params.Config,
 		}
 
@@ -336,12 +296,11 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 		)
 
 		if len(summarizations) > 0 {
-			firstSummary := summarizations[0]
-			if len(firstSummary) > 50 {
-				condensedSummary = firstSummary[:50] + "..."
-			} else {
-				condensedSummary = firstSummary
+			firstSummary := []rune(strings.TrimSpace(summarizations[0]))
+			if len(firstSummary) > 120 {
+				firstSummary = firstSummary[:120]
 			}
+			condensedSummary = string(firstSummary)
 		} else {
 			condensedSummary = fmt.Sprintf("過去 %d 小時的群組聊天回顧", hours)
 		}
@@ -349,96 +308,8 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 		condensedSummary = strings.TrimSpace(condensedSummary)
 	}
 
-	modelStatusLines := chathistories.BuildModelExecutionStatusLines(condensedTrace, recapTrace)
-	formattedModelStatusLines := strings.Join(lo.Map(modelStatusLines, func(item string, _ int) string {
-		return "<i>" + tgbot.EscapeHTMLSymbols(item) + "</i>"
-	}), "\n")
-
-	// 準備 Telegraph 文章內容
-	pageTitle := fmt.Sprintf("【群組 %s】自動 %d 小時總結", tgbot.EscapeHTMLSymbols(chatTitle), hours)
-
-	htmlSummary := "<hr>"
-	for _, summaryBlock := range summarizations {
-		lines := strings.Split(summaryBlock, "\n")
-		for _, line := range lines {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			if strings.HasPrefix(line, "## ") {
-				titleContent := strings.TrimPrefix(line, "## ")
-				// The content from template may already contain HTML tags like <a>, so no escaping here.
-				htmlSummary += "<h2>" + titleContent + "</h2>"
-			} else {
-				// For other lines, just wrap them in <p> tags.
-				// The content inside (participants, discussion points) is already escaped or formatted by the template.
-				htmlSummary += "<p>" + line + "</p>"
-			}
-		}
-	}
-
-	if len(modelStatusLines) > 1 {
-		htmlSummary += "<hr><p><em>" + tgbot.EscapeHTMLSymbols(modelStatusLines[1]) + "</em></p>"
-	}
-
-	// 建立 Telegraph 文章
-	var telegraphURL string
-	var telegraphURLs []string
-	if len(htmlSummary) > 60*1024 {
-		telegraphURLs, err = m.telegraph.CreatePageSeries(context.Background(), pageTitle, htmlSummary)
-		if err != nil {
-			m.logger.Error("failed to create telegraph page series for auto recap",
-				zap.Error(err),
-				zap.Int64("chat_id", chatID),
-				zap.String("title", pageTitle),
-			)
-			return
-		}
-		if len(telegraphURLs) > 0 {
-			telegraphURL = telegraphURLs[0]
-		}
-	} else {
-		telegraphURL, err = m.telegraph.CreatePage(context.Background(), pageTitle, htmlSummary)
-		if err != nil {
-			m.logger.Error("failed to create telegraph page for auto recap",
-				zap.Error(err),
-				zap.Int64("chat_id", chatID),
-				zap.String("title", pageTitle),
-			)
-			return
-		}
-		telegraphURLs = []string{telegraphURL}
-	}
-
-	if telegraphURL == "" {
-		m.logger.Error("telegraph url is empty, aborting auto recap sending", zap.Int64("chat_id", chatID))
-		return
-	}
-
-	// 準備多頁提醒資訊
-	multiPageInfo := ""
-	if len(telegraphURLs) > 1 {
-		multiPageInfo = "\n\n<b>注意：</b>由於內容較長，已分為 " + strconv.Itoa(len(telegraphURLs)) + " 個頁面："
-		for i, url := range telegraphURLs {
-			multiPageInfo += fmt.Sprintf("\n- <a href=\"%s\">第 %d 部分</a>", url, i+1)
-		}
-	}
-
-	// 準備 Telegram 訊息內容
-	content := fmt.Sprintf(
-		"📝 <b>自動聊天回顧已發布到 Telegraph</b>: <a href=\"%s\">%s</a>%s\n\n<b>濃縮總結：</b>\n%s\n\n%s#recap #recap_auto\n%s",
-		telegraphURL,
-		tgbot.EscapeHTMLSymbols(pageTitle),
-		multiPageInfo,
-		tgbot.EscapeHTMLSymbols(condensedSummary),
-		lo.Ternary(chatType == telegram.ChatTypeGroup, "<b>Tips: </b>由于群组不是超级群组（supergroup），因此消息链接引用暂时被禁用了，如果希望使用该功能，请通过短时间内将群组开放为公共群组并还原回私有群组，或通过其他操作将本群组升级为超级群組后，该功能方可恢复正常运作。\n\n", ""),
-		formattedModelStatusLines,
-	)
-
-	// 發送訊息
-	limiter := ratelimit.New(5) // 限制每秒最多發送5條訊息
-	targetChats := make([]targetChat, 0)
-
-	// 根據發送模式決定目標聊天
+	limiter := ratelimit.New(5)
+	targetChats := make([]targetChat, 0, len(subscribers)+1)
 	if tgchat.AutoRecapSendMode(options.AutoRecapSendMode) == tgchat.AutoRecapSendModePublicly {
 		targetChats = append(targetChats, targetChat{
 			chatID:              chatID,
@@ -455,19 +326,15 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 
 	// 發送訊息到所有目標聊天
 	for _, targetChat := range targetChats {
-		limiter.Take()
 		m.logger.Info("sending chat histories recap for chat",
 			zap.Int64("summarized_for_chat_id", chatID),
 			zap.Int64("sending_target_chat_id", targetChat.chatID))
 
-		msg := tgbotapi.NewMessage(targetChat.chatID, "")
-		msg.ParseMode = tgbotapi.ModeHTML
-
+		targetKeyboard := inlineKeyboardMarkup
+		subscriptionChatTitle := ""
 		if targetChat.isPrivateSubscriber {
-			msg.Text = fmt.Sprintf("您好，这是您订阅的 <b>%s</b> 群组的定时聊天回顾。\n\n%s",
-				tgbot.EscapeHTMLSymbols(chatTitle), content)
-
-			inlineKeyboardMarkup, err := m.chathistories.NewVoteRecapWithUnsubscribeInlineKeyboardMarkup(
+			subscriptionChatTitle = chatTitle
+			targetKeyboard, err = m.chathistories.NewVoteRecapWithUnsubscribeInlineKeyboardMarkup(
 				m.botService.Bot(), chatID, chatTitle, targetChat.chatID, logID,
 				counts.UpVotes, counts.DownVotes, counts.Lmao)
 			if err != nil {
@@ -478,52 +345,59 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 				)
 				continue
 			}
-
-			msg.ReplyMarkup = inlineKeyboardMarkup
-		} else {
-			msg.Text = content
-			msg.ReplyMarkup = inlineKeyboardMarkup
 		}
 
-		sentMsg, err := m.botService.Send(msg)
-		if err != nil {
-			m.logger.Error("failed to send chat histories recap",
-				zap.Int64("chat_id", chatID),
-				zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
-				zap.Error(err),
-			)
+		visibleSummary := chathistories.BuildRichRecapSummary(chathistories.RichRecapSummaryConfig{
+			Title:                 chatTitle,
+			Hours:                 hours,
+			Automatic:             true,
+			CondensedSummary:      condensedSummary,
+			GeneralGroupNotice:    chatType == telegram.ChatTypeGroup,
+			SubscriptionChatTitle: subscriptionChatTitle,
+			CondensedTrace:        condensedTrace,
+			RecapTrace:            recapTrace,
+		})
+		parts := chathistories.ComposeRichRecapMessages(visibleSummary, summarizations)
+		if len(parts) == 0 {
+			m.logger.Error("rich recap composer returned no messages", zap.Int64("chat_id", chatID))
 			continue
 		}
 
-		// 處理訊息釘選
-		if options.PinAutoRecapMessage && !targetChat.isPrivateSubscriber {
-			may := fo.NewMay0().Use(func(err error, messageArgs ...any) {
-				if len(messageArgs) == 0 {
-					m.logger.Error(err.Error())
-					return
+		sentMessages, err := recapdelivery.SendRichRecapParts(m.botService, recapdelivery.Config{
+			ChatID:      targetChat.chatID,
+			Parts:       parts,
+			ReplyMarkup: &targetKeyboard,
+			BeforeSend: func() {
+				limiter.Take()
+			},
+		})
+		if err != nil {
+			m.logger.Error("failed to send rich chat histories recap",
+				zap.Int64("chat_id", chatID),
+				zap.Int64("target_chat_id", targetChat.chatID),
+				zap.Int("auto_recap_rates", options.AutoRecapRatesPerDay),
+				zap.Int("sent_message_count", len(sentMessages)),
+				zap.Error(err),
+			)
+			for index := range sentMessages {
+				if saveErr := m.chathistories.SaveOneTelegramSentMessage(&sentMessages[index], false); saveErr != nil {
+					m.logger.Error("failed to save partially sent telegram message",
+						zap.Int64("chat_id", chatID),
+						zap.Int("message_id", sentMessages[index].MessageID),
+						zap.Error(saveErr),
+					)
 				}
-				prefix, _ := messageArgs[0].(string)
+			}
+			continue
+		}
+		if len(sentMessages) == 0 {
+			m.logger.Error("rich recap sender returned no messages", zap.Int64("chat_id", chatID))
+			continue
+		}
 
-				if len(messageArgs) == 1 {
-					m.logger.Error(prefix, zap.Error(err))
-					return
-				}
-				fields := make([]zap.Field, 0)
-				fields = append(fields, zap.Error(err))
-
-				for i, v := range messageArgs[1:] {
-					field, ok := v.(zap.Field)
-					if !ok {
-						fields = append(fields, zap.Any(fmt.Sprintf("error_field_%d", i), field))
-					} else {
-						fields = append(fields, field)
-					}
-				}
-
-				m.logger.Error(prefix, fields...)
-			})
-
-			// 取消釘選上一條訊息
+		pinFirstMessage := options.PinAutoRecapMessage && !targetChat.isPrivateSubscriber
+		pinSucceeded := false
+		if pinFirstMessage {
 			lastPinnedMessage, err := m.chathistories.FindLastTelegramPinnedMessage(chatID)
 			if err != nil {
 				m.logger.Error("failed to find last pinned message",
@@ -531,85 +405,30 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 					zap.Error(err),
 				)
 			} else {
-				may.Invoke(
-					m.botService.UnpinChatMessage(tgbot.NewUnpinChatMessageConfig(chatID, lastPinnedMessage.MessageID)),
-					"failed to unpin chat message",
-					zap.Int64("chat_id", chatID),
-					zap.Int("message_id", lastPinnedMessage.MessageID),
-				)
-				may.Invoke(
-					m.chathistories.UpdatePinnedMessage(lastPinnedMessage.ChatID, lastPinnedMessage.MessageID, false),
-					"failed to save one telegram sent message",
-					zap.Int64("chat_id", lastPinnedMessage.ChatID),
-					zap.Int("message_id", lastPinnedMessage.MessageID),
-				)
+				if unpinErr := m.botService.UnpinChatMessage(tgbot.NewUnpinChatMessageConfig(chatID, lastPinnedMessage.MessageID)); unpinErr != nil {
+					m.logger.Error("failed to unpin chat message", zap.Error(unpinErr), zap.Int64("chat_id", chatID))
+				}
+				if updateErr := m.chathistories.UpdatePinnedMessage(lastPinnedMessage.ChatID, lastPinnedMessage.MessageID, false); updateErr != nil {
+					m.logger.Error("failed to update previous pinned message", zap.Error(updateErr), zap.Int64("chat_id", chatID))
+				}
 			}
 
-			// 釘選新訊息
-			may.Invoke(
-				m.botService.PinChatMessage(tgbot.NewPinChatMessageConfig(chatID, sentMsg.MessageID)),
-				"failed to pin chat message",
-				zap.Int64("chat_id", chatID),
-				zap.Int("message_id", sentMsg.MessageID),
-			)
-			may.Invoke(
-				m.chathistories.SaveOneTelegramSentMessage(&sentMsg, true),
-				"failed to save one telegram sent message",
-			)
-		} else {
-			err = m.chathistories.SaveOneTelegramSentMessage(&sentMsg, false)
-			if err != nil {
+			if pinErr := m.botService.PinChatMessage(tgbot.NewPinChatMessageConfig(chatID, sentMessages[0].MessageID)); pinErr != nil {
+				m.logger.Error("failed to pin first rich recap message", zap.Error(pinErr), zap.Int64("chat_id", chatID))
+			} else {
+				pinSucceeded = true
+			}
+		}
+
+		for index := range sentMessages {
+			isPinned := pinSucceeded && index == 0
+			if saveErr := m.chathistories.SaveOneTelegramSentMessage(&sentMessages[index], isPinned); saveErr != nil {
 				m.logger.Error("failed to save one telegram sent message",
 					zap.Int64("chat_id", chatID),
-					zap.Error(err))
+					zap.Int("message_id", sentMessages[index].MessageID),
+					zap.Error(saveErr),
+				)
 			}
 		}
 	}
 }
-
-/*
-// sendAutoRecapToGroup sends an auto-recap to a Telegram group, now creating a Telegraph page first
-func (s *AutoRecapService) sendAutoRecapToGroup(
-	ctx context.Context,
-	bot *tgbot.Bot,
-	c *ent.TelegramChat,
-	o *ent.TelegramChatRecapsOptions,
-	summarizations []string,
-	ratesParDayRate int,
-) error {
-	// ... function body ...
-	return nil
-}
-
-// sendRegularAutoRecapToGroup is a fallback function for when Telegraph creation fails
-func (s *AutoRecapService) sendRegularAutoRecapToGroup(
-	ctx context.Context,
-	bot *tgbot.Bot,
-	c *ent.TelegramChat,
-	o *ent.TelegramChatRecapsOptions,
-	summarizations []string,
-	ratesParDayRate int,
-) error {
-	// ... function body ...
-	return nil
-}
-
-// sendAutoRecapToPrivate sends an auto-recap to a Telegram private chat, now creating a Telegraph page first
-func (s *AutoRecapService) sendAutoRecapToPrivate(ctx context.Context, bot *tgbot.Bot, c *ent.TelegramChat, subscriberIDs []int64, summarizations []string, ratesParDayRate int) error {
-	// ... function body ...
-	return nil
-}
-
-// sendRegularAutoRecapToPrivate is a fallback function for when Telegraph creation fails
-func (s *AutoRecapService) sendRegularAutoRecapToPrivate(ctx context.Context, bot *tgbot.Bot, c *ent.TelegramChat, subscriberIDs []int64, summarizations []string, ratesParDayRate int) error {
-	// ... function body ...
-	return nil
-}
-*/
-
-/*
-func (s *AutoRecapService) handleSendAutoRecap(ctx context.Context, bot *tgbot.Bot, c *ent.TelegramChat, o *ent.TelegramChatRecapsOptions, subscriberIDs []int64, summarizations []string, ratesParDayRate int) error {
-	// ... function body ...
-	return nil
-}
-*/

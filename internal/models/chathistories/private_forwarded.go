@@ -207,10 +207,8 @@ func (m *Model) FindPrivateForwardedChatHistories(userID int64) ([]telegramPriva
 	return telegramPrivateForwardedReplayChatHistories, nil
 }
 
-func (m *Model) SummarizePrivateForwardedChatHistories(userID int64, histories []telegramPrivateForwardedReplayChatHistory) ([]string, error) {
+func (m *Model) SummarizePrivateForwardedChatHistories(userID int64, histories []telegramPrivateForwardedReplayChatHistory) ([]string, *openai.RecapExecutionTrace, error) {
 	historiesLLMFriendly := make([]string, 0, len(histories))
-	historiesIncludedMessageIDs := make([]int64, 0)
-
 	for _, message := range histories {
 		historiesLLMFriendly = append(historiesLLMFriendly, fmt.Sprintf(
 			"msgId:%d: %s sent: %s",
@@ -218,31 +216,21 @@ func (m *Model) SummarizePrivateForwardedChatHistories(userID int64, histories [
 			formatFullNameAndUsername(message.ActorDisplayName, message.ActorUsername),
 			message.Text,
 		))
-
-		historiesIncludedMessageIDs = append(historiesIncludedMessageIDs, int64(message.MessageID))
 	}
 
 	chatHistories := strings.Join(historiesLLMFriendly, "\n")
 
-	summarizations, statusUsage, _, err := m.summarizeChatHistories(userID, historiesIncludedMessageIDs, chatHistories)
+	summarizations, statusUsage, recapTrace, err := m.summarizeChatHistories(userID, chatHistories)
 	if err != nil {
-		return make([]string, 0), err
+		return make([]string, 0), recapTrace, err
 	}
 
-	summarizations = lo.Map(summarizations, func(item *openai.ChatHistorySummarizationOutputs, _ int) *openai.ChatHistorySummarizationOutputs {
-		item.SinceID = 0
-		item.Discussion = lo.Map(item.Discussion, func(item *openai.ChatHistorySummarizationOutputsDiscussion, _ int) *openai.ChatHistorySummarizationOutputsDiscussion {
-			item.KeyIDs = nil
-			return item
-		})
-
-		return item
+	ss := lo.Filter(lo.Map(summarizations, func(item string, _ int) string {
+		sanitized := SanitizeDetailedRecapMarkdown(item)
+		return strings.TrimSpace(ResolveRichRecapReferences(sanitized, 0, telegram.ChatTypePrivate, nil))
+	}), func(item string, _ int) bool {
+		return item != ""
 	})
-
-	ss, err := m.renderRecapTemplates(0, telegram.ChatTypePrivate, summarizations)
-	if err != nil {
-		return make([]string, 0), err
-	}
 
 	err = m.ent.LogChatHistoriesRecap.
 		Create().
@@ -256,8 +244,8 @@ func (m *Model) SummarizePrivateForwardedChatHistories(userID int64, histories [
 		SetRecapType(int(RecapTypeForPrivateForwarded)).
 		Exec(context.Background())
 	if err != nil {
-		return make([]string, 0), err
+		return make([]string, 0), recapTrace, err
 	}
 
-	return ss, nil
+	return ss, recapTrace, nil
 }

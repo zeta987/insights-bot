@@ -9,10 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/nekomeowww/insights-bot/internal/configs"
@@ -25,6 +23,21 @@ import (
 )
 
 var client *OpenAIClient
+
+func TestDefaultCondensedPromptsRequestStructuredRichMarkdown(t *testing.T) {
+	require.Contains(t, SarcasticCondensedSystemPrompt, "###")
+	require.Contains(t, SarcasticCondensedSystemPrompt, "无序列表")
+	require.Contains(t, SarcasticCondensedSystemPrompt, "表格")
+	require.Contains(t, CheckCondensedOutputSystemPrompt, "###")
+	require.NotContains(t, CheckCondensedOutputSystemPrompt, "one natural sentence")
+}
+
+func TestNormalizeStructuredCondensedOutputAcceptsAsteriskList(t *testing.T) {
+	normalized, err := normalizeStructuredCondensedOutputContent("### 主題\n\n* **重點**：內容")
+
+	require.NoError(t, err)
+	require.Contains(t, normalized, "* **重點**：內容")
+}
 
 func TestMain(m *testing.M) {
 	logger, err := lib.NewLogger()(lib.NewLoggerParams{
@@ -128,14 +141,6 @@ func TestShouldFallbackByError(t *testing.T) {
 	require.False(t, shouldFallbackByError(context.Canceled))
 }
 
-func TestForceRepairSummaryJSON(t *testing.T) {
-	raw := "```json\n[\n  {\n    \"topicName\": \"Topic\",\n    \"sinceId\": 1,\n    \"participants\": [\"insights-bot\"],\n    \"discussion\": [\n      {\n        \"point\": \"P\",\n        \"keyIds\": [1,],\n      }\n    ],\n    \"conclusion\": \"C\",\n  },\n]\n```"
-
-	repaired := forceRepairSummaryJSON(raw)
-	_, err := validateAndCompactSummaryJSON(repaired)
-	require.NoError(t, err)
-}
-
 func TestNewClientBackupModelDefaults(t *testing.T) {
 	logger, err := lib.NewLogger()(lib.NewLoggerParams{
 		Configs: configs.NewTestConfig()(),
@@ -169,65 +174,501 @@ func TestNewClientBackupModelDefaults(t *testing.T) {
 	require.Equal(t, "primary-model", impl.sarcasticCondensedModelBackup)
 }
 
-func readBuildFixture(t *testing.T, fileName string) string {
-	t.Helper()
-
-	content, err := os.ReadFile(filepath.Join("..", "..", "..", "build", fileName))
+func TestChatHistorySummarizationPromptRequestsRichMarkdown(t *testing.T) {
+	var userPrompt strings.Builder
+	err := ChatHistorySummarizationUserPrompt.Execute(&userPrompt, NewChatHistorySummarizationPromptInputs(
+		"msgId:1: Zeta sent: hello",
+		"Traditional Chinese",
+	))
 	require.NoError(t, err)
 
-	return string(content)
+	require.Contains(t, ChatHistorySummarizationSystemPrompt, "Rich Markdown")
+	require.Contains(t, ChatHistorySummarizationSystemPrompt, "{{tg-ref:1,2}}")
+	require.Contains(t, ChatHistorySummarizationSystemPrompt, "Do not output JSON")
+	require.NotContains(t, ChatHistorySummarizationSystemPrompt, "JSON Schema")
+	require.Contains(t, userPrompt.String(), "Traditional Chinese")
+	require.Contains(t, userPrompt.String(), "msgId:1")
 }
 
-func TestNormalizeSummaryJSONContentFromBuildValidFixture(t *testing.T) {
-	raw := readBuildFixture(t, "g3.1p合法json範本.json")
-
-	normalized, err := client.normalizeSummaryJSONContent(context.Background(), raw, nil)
-	require.NoError(t, err)
-	require.True(t, json.Valid([]byte(normalized)))
-
-	var outputs []*ChatHistorySummarizationOutputs
-	require.NoError(t, json.Unmarshal([]byte(normalized), &outputs))
-	require.NotEmpty(t, outputs)
-}
-
-func TestNormalizeSummaryJSONContentFromBuildInvalidFixtureByCheckModel(t *testing.T) {
-	rawInvalid := readBuildFixture(t, "g3.1p不合法json範本.json")
-	rawValid := readBuildFixture(t, "g3.1p合法json範本.json")
-
-	var callCount int32
-
+func TestSummarizeChatHistoriesReturnsRawRichMarkdown(t *testing.T) {
+	expected := "## Topic\n\n- Decision reached {{tg-ref:1,2}}"
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "/v1/chat/completions", request.URL.Path)
-		atomic.AddInt32(&callCount, 1)
-
 		body, err := io.ReadAll(request.Body)
 		require.NoError(t, err)
-		require.Contains(t, string(body), `"model":"check-model"`)
+		require.Contains(t, string(body), "Rich Markdown")
+		require.NotContains(t, string(body), "JSON Schema")
 
 		writer.Header().Set("Content-Type", "application/json")
 		_, err = writer.Write([]byte(fmt.Sprintf(
-			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":"check-model","choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
-			rawValid,
+			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":"resolved-primary-model","choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
+			expected,
 		)))
 		require.NoError(t, err)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	config := goopenai.DefaultConfig("test-secret")
 	config.BaseURL = server.URL + "/v1"
-
-	checkClient := &OpenAIClient{
-		checkModelName: "check-model",
-		client:         goopenai.NewClientWithConfig(config),
-		limiter:        ratelimit.New(1000),
+	richClient := &OpenAIClient{
+		modelName:                    "primary-model",
+		modelNameBackup:              "primary-model",
+		defaultSummarizationLanguage: "Traditional Chinese",
+		client:                       goopenai.NewClientWithConfig(config),
+		limiter:                      ratelimit.New(1000),
 	}
 
-	normalized, err := checkClient.normalizeSummaryJSONContent(context.Background(), rawInvalid, nil)
+	trace := &RecapExecutionTrace{}
+	response, err := richClient.SummarizeChatHistories(
+		WithRecapExecutionTrace(context.Background(), trace),
+		"msgId:1: Zeta sent: hello",
+		"Traditional Chinese",
+	)
 	require.NoError(t, err)
-	require.True(t, json.Valid([]byte(normalized)))
-	require.Greater(t, atomic.LoadInt32(&callCount), int32(0))
+	require.Len(t, response.Choices, 1)
+	require.Equal(t, expected, response.Choices[0].Message.Content)
+	require.Equal(t, 9, response.Usage.TotalTokens)
+	require.Equal(t, "primary-model", trace.Generation.PrimaryModel)
+	require.Equal(t, "resolved-primary-model", trace.Generation.PrimaryUsedModel)
+}
 
-	var outputs []*ChatHistorySummarizationOutputs
-	require.NoError(t, json.Unmarshal([]byte(normalized), &outputs))
-	require.NotEmpty(t, outputs)
+func TestSummarizeChatHistoriesRecordsResolvedBackupModel(t *testing.T) {
+	requestedModels := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		requestedModels = append(requestedModels, payload.Model)
+
+		content := ""
+		responseModel := "resolved-detail-primary"
+		if payload.Model == "detailBackup" {
+			content = "## 主題\n\n- 備援詳細摘要"
+			responseModel = "resolved-detail-backup"
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := writer.Write([]byte(fmt.Sprintf(
+			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
+			responseModel,
+			content,
+		)))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		modelName:                    "detailPrimary",
+		modelNameBackup:              "detailBackup",
+		defaultSummarizationLanguage: "Traditional Chinese",
+		client:                       goopenai.NewClientWithConfig(config),
+		logger:                       client.logger,
+		limiter:                      ratelimit.New(1000),
+	}
+	trace := &RecapExecutionTrace{}
+
+	response, err := richClient.SummarizeChatHistories(
+		WithRecapExecutionTrace(context.Background(), trace),
+		"msgId:1: Zeta sent: hello",
+		"Traditional Chinese",
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, "## 主題\n\n- 備援詳細摘要", response.Choices[0].Message.Content)
+	require.Equal(t, []string{"detailPrimary", "detailBackup"}, requestedModels)
+	require.True(t, trace.Generation.BackupUsed)
+	require.True(t, trace.Generation.BackupSucceeded)
+	require.Empty(t, trace.Generation.PrimaryUsedModel)
+	require.Equal(t, "resolved-detail-backup", trace.Generation.BackupUsedModel)
+}
+
+func TestSarcasticCondenseRecordsConfiguredCheckModelWithoutCallingIt(t *testing.T) {
+	requestedModels := make([]string, 0, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		requestedModels = append(requestedModels, payload.Model)
+		writer.Header().Set("Content-Type", "application/json")
+		content := "### 正常濃縮摘要\n\n- **重點**：維持 Rich Markdown 結構"
+		_, err := writer.Write([]byte(fmt.Sprintf(
+			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
+			"resolved-condensed-model",
+			content,
+		)))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName:   "condensedModel",
+		sarcasticCondensedModelBackup: "condensedModel",
+		checkModelName:                "checkModel",
+		checkModelNameBackup:          "checkBackup",
+		client:                        goopenai.NewClientWithConfig(config),
+		logger:                        client.logger,
+		limiter:                       ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.NoError(t, err)
+	require.Contains(t, result, "### 正常濃縮摘要")
+	require.Equal(t, []string{"condensedModel"}, requestedModels)
+	require.Equal(t, "resolved-condensed-model", trace.Generation.PrimaryUsedModel)
+	require.Equal(t, "checkModel", trace.Check.Generation.PrimaryModel)
+	require.Equal(t, "checkBackup", trace.Check.Generation.BackupModel)
+	require.False(t, trace.Check.Attempted)
+}
+
+func TestSarcasticCondenseRecordsSuccessfulCheckRepair(t *testing.T) {
+	requestedModels := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		requestedModels = append(requestedModels, payload.Model)
+		content := `{"summary":"invalid"}`
+		if payload.Model == "checkModel" {
+			content = "### 修復後摘要\n\n- **重點**：Check 已產生 Rich Markdown"
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		responseModel := payload.Model
+		if payload.Model == "checkModel" {
+			responseModel = "resolved-check-model"
+		}
+		_, err := writer.Write([]byte(fmt.Sprintf(
+			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
+			responseModel,
+			content,
+		)))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName:   "condensedModel",
+		sarcasticCondensedModelBackup: "condensedModel",
+		checkModelName:                "checkModel",
+		client:                        goopenai.NewClientWithConfig(config),
+		logger:                        client.logger,
+		limiter:                       ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.NoError(t, err)
+	require.Contains(t, result, "### 修復後摘要")
+	require.Equal(t, []string{"condensedModel", "checkModel"}, requestedModels)
+	require.True(t, trace.Generation.PrimaryFailed)
+	require.True(t, trace.Check.Attempted)
+	require.True(t, trace.Check.Succeeded)
+	require.Equal(t, "resolved-check-model", trace.Check.Generation.PrimaryUsedModel)
+}
+
+func TestSarcasticCondenseRecordsResolvedBackupModel(t *testing.T) {
+	requestedModels := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		requestedModels = append(requestedModels, payload.Model)
+
+		responseModel := "resolved-condensed-primary"
+		content := "### 主摘要\n\n- **重點**：主模型內容"
+		if payload.Model == "condensedBackup" {
+			responseModel = "resolved-condensed-backup"
+			content = "### 備援摘要\n\n- **重點**：備援模型內容"
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := writer.Write([]byte(fmt.Sprintf(
+			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
+			responseModel,
+			content,
+		)))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName:         "condensedPrimary",
+		sarcasticCondensedModelBackup:       "condensedBackup",
+		forceCondensedPrimaryFailureForTest: true,
+		client:                              goopenai.NewClientWithConfig(config),
+		logger:                              client.logger,
+		limiter:                             ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.NoError(t, err)
+	require.Contains(t, result, "### 備援摘要")
+	require.Equal(t, []string{"condensedPrimary", "condensedBackup"}, requestedModels)
+	require.True(t, trace.Generation.BackupUsed)
+	require.True(t, trace.Generation.BackupSucceeded)
+	require.Empty(t, trace.Generation.PrimaryUsedModel)
+	require.Equal(t, "resolved-condensed-backup", trace.Generation.BackupUsedModel)
+}
+
+func TestSarcasticCondenseDoesNotRecordStructurallyInvalidPrimaryAsUsed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := writer.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":"resolved-invalid-primary","choices":[{"index":0,"message":{"role":"assistant","content":"缺少 Rich Markdown 結構"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName: "condensedPrimary",
+		client:                      goopenai.NewClientWithConfig(config),
+		logger:                      client.logger,
+		limiter:                     ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.Error(t, err)
+	require.Empty(t, result)
+	require.True(t, trace.Generation.PrimaryFailed)
+	require.Empty(t, trace.Generation.PrimaryUsedModel)
+}
+
+func TestSarcasticCondenseCheckRepairsResolvedBackupSourceOnly(t *testing.T) {
+	requestedModels := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		requestedModels = append(requestedModels, payload.Model)
+
+		responseModel := "resolved-condensed-primary"
+		content := "主模型缺少 Rich Markdown 結構"
+		switch payload.Model {
+		case "condensedBackup":
+			responseModel = "resolved-condensed-backup"
+			content = "備援模型仍缺少 Rich Markdown 結構"
+		case "checkModel":
+			responseModel = "resolved-check-model"
+			content = "### 修復後摘要\n\n- **重點**：Check 修復備援內容"
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := writer.Write([]byte(fmt.Sprintf(
+			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
+			responseModel,
+			content,
+		)))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName:   "condensedPrimary",
+		sarcasticCondensedModelBackup: "condensedBackup",
+		checkModelName:                "checkModel",
+		client:                        goopenai.NewClientWithConfig(config),
+		logger:                        client.logger,
+		limiter:                       ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.NoError(t, err)
+	require.Contains(t, result, "### 修復後摘要")
+	require.Equal(t, []string{"condensedPrimary", "condensedBackup", "checkModel"}, requestedModels)
+	require.Empty(t, trace.Generation.PrimaryUsedModel)
+	require.True(t, trace.Generation.BackupUsed)
+	require.False(t, trace.Generation.BackupSucceeded)
+	require.Equal(t, "resolved-condensed-backup", trace.Generation.BackupUsedModel)
+	require.True(t, trace.Check.Succeeded)
+	require.Equal(t, "resolved-check-model", trace.Check.Generation.PrimaryUsedModel)
+}
+
+func TestSarcasticCondenseCheckRepairsPrimaryAfterBackupTransportFailure(t *testing.T) {
+	requestedModels := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		requestedModels = append(requestedModels, payload.Model)
+
+		if payload.Model == "condensedBackup" {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusBadGateway)
+			_, err := writer.Write([]byte(`{"error":{"message":"backup unavailable","type":"server_error"}}`))
+			require.NoError(t, err)
+			return
+		}
+
+		responseModel := "resolved-condensed-primary"
+		content := "主模型缺少 Rich Markdown 結構"
+		if payload.Model == "checkModel" {
+			responseModel = "resolved-check-model"
+			content = "### 修復後摘要\n\n- **重點**：Check 修復主模型內容"
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := writer.Write([]byte(fmt.Sprintf(
+			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
+			responseModel,
+			content,
+		)))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName:   "condensedPrimary",
+		sarcasticCondensedModelBackup: "condensedBackup",
+		checkModelName:                "checkModel",
+		client:                        goopenai.NewClientWithConfig(config),
+		logger:                        client.logger,
+		limiter:                       ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.NoError(t, err)
+	require.Contains(t, result, "### 修復後摘要")
+	require.Equal(t, []string{"condensedPrimary", "condensedBackup", "checkModel"}, requestedModels)
+	require.Equal(t, "resolved-condensed-primary", trace.Generation.PrimaryUsedModel)
+	require.True(t, trace.Generation.BackupUsed)
+	require.False(t, trace.Generation.BackupSucceeded)
+	require.Empty(t, trace.Generation.BackupUsedModel)
+	require.True(t, trace.Check.Succeeded)
+	require.Equal(t, "resolved-check-model", trace.Check.Generation.PrimaryUsedModel)
+}
+
+func TestSarcasticCondenseUsesCheckBackupWhenPrimaryCheckOutputIsInvalid(t *testing.T) {
+	requestedModels := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		model, _ := payload["model"].(string)
+		requestedModels = append(requestedModels, model)
+
+		content := "{\"summary\":\"invalid\"}"
+		if model == "checkPrimary" {
+			content = "普通長段落仍不符合 Rich Markdown 結構"
+		}
+		if model == "checkBackup" {
+			content = "### 修復後摘要\n\n- **重點**：備援 Check 已產生 Rich Markdown"
+		}
+		responseModel := model
+		if model == "checkBackup" {
+			responseModel = "resolved-check-backup"
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := writer.Write([]byte(fmt.Sprintf(
+			"{\"id\":\"chatcmpl-test\",\"object\":\"chat.completion\",\"created\":1730000000,\"model\":%q,\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":%q},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":5,\"total_tokens\":9}}",
+			responseModel,
+			content,
+		)))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName:   "condensedModel",
+		sarcasticCondensedModelBackup: "condensedModel",
+		checkModelName:                "checkPrimary",
+		checkModelNameBackup:          "checkBackup",
+		client:                        goopenai.NewClientWithConfig(config),
+		logger:                        client.logger,
+		limiter:                       ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.NoError(t, err)
+	require.Contains(t, result, "### 修復後摘要")
+	require.Equal(t, []string{"condensedModel", "checkPrimary", "checkBackup"}, requestedModels)
+	require.True(t, trace.Check.Attempted)
+	require.True(t, trace.Check.Succeeded)
+	require.True(t, trace.Check.Generation.PrimaryFailed)
+	require.Contains(t, trace.Check.Generation.PrimaryFailureReason, "level-three heading")
+	require.True(t, trace.Check.Generation.BackupUsed)
+	require.True(t, trace.Check.Generation.BackupSucceeded)
+	require.Equal(t, "resolved-check-backup", trace.Check.Generation.BackupUsedModel)
+}
+
+func TestSarcasticCondenseForcedCheckFailureSwitchesToCheckBackup(t *testing.T) {
+	requestedModels := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		model, _ := payload["model"].(string)
+		requestedModels = append(requestedModels, model)
+
+		content := "{\"summary\":\"invalid\"}"
+		if model == "checkBackup" {
+			content = "### 強制切換後摘要\n\n- **重點**：備援 Check 已接手"
+		}
+		responseModel := model
+		if model == "checkBackup" {
+			responseModel = "resolved-forced-check-backup"
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := writer.Write([]byte(fmt.Sprintf(
+			"{\"id\":\"chatcmpl-test\",\"object\":\"chat.completion\",\"created\":1730000000,\"model\":%q,\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":%q},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":5,\"total_tokens\":9}}",
+			responseModel,
+			content,
+		)))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName:   "condensedModel",
+		sarcasticCondensedModelBackup: "condensedModel",
+		checkModelName:                "checkPrimary",
+		checkModelNameBackup:          "checkBackup",
+		forceCheckModelFailure:        true,
+		client:                        goopenai.NewClientWithConfig(config),
+		logger:                        client.logger,
+		limiter:                       ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.NoError(t, err)
+	require.Contains(t, result, "### 強制切換後摘要")
+	require.Equal(t, []string{"condensedModel", "checkBackup"}, requestedModels)
+	require.True(t, trace.Check.Succeeded)
+	require.True(t, trace.Check.Generation.PrimaryFailed)
+	require.Contains(t, trace.Check.Generation.PrimaryFailureReason, "forced failure")
+	require.True(t, trace.Check.Generation.BackupUsed)
+	require.True(t, trace.Check.Generation.BackupSucceeded)
+	require.Equal(t, "resolved-forced-check-backup", trace.Check.Generation.BackupUsedModel)
 }

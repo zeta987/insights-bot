@@ -73,14 +73,14 @@ Each bot platform uses a handler pattern for processing commands:
 2. **Middleware Processing** → Message recording, rate limiting
 3. **Command Routing** → Dispatcher routes to appropriate handler
 4. **Business Logic** → Handler calls service layer (e.g., SMR service)
-5. **External APIs** → Services interact with OpenAI, Telegraph, etc.
+5. **External APIs** → Services interact with OpenAI and Telegram.
 6. **Data Persistence** → Results stored in PostgreSQL/Redis
 7. **Response** → Formatted response sent back to user
 
 ### Key Services
 - **SMR Service** (`internal/services/smr/`): Handles web page summarization with queue processing
 - **Auto Recap Service** (`internal/services/autorecap/`): Manages scheduled chat recaps
-- **Telegraph Service** (`internal/services/telegraph/`): Creates web pages for long summaries
+- **Recap Delivery Service** (`internal/services/recapdelivery/`): Sends Rich Messages and controlled plain-text fallbacks
 
 ### Database Schema Management
 The project uses **Ent** ORM. When modifying database schemas:
@@ -134,7 +134,7 @@ SARCASTIC_CONDENSED_MODEL_NAME=  # Optional: for sarcastic mode
 - Leverage Ent's type-safe query builder
 
 ### Testing Strategies
-- Unit tests should mock external dependencies (OpenAI, Telegraph)
+- Unit tests should mock external dependencies (OpenAI and Telegram)
 - Use `internal/thirdparty/openai/openaimock/` for OpenAI mocking
 - Integration tests can use Docker Compose with test profile
 

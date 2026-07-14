@@ -5,7 +5,6 @@ import (
 	"github.com/nekomeowww/insights-bot/internal/services/health"
 	"github.com/nekomeowww/insights-bot/internal/services/pprof"
 	"github.com/nekomeowww/insights-bot/internal/services/smr"
-	"github.com/nekomeowww/insights-bot/internal/services/telegraph"
 	"go.uber.org/fx"
 )
 
@@ -15,6 +14,5 @@ func NewModules() fx.Option {
 		fx.Provide(pprof.NewPprof()),
 		fx.Provide(autorecap.NewAutoRecapService()),
 		fx.Options(smr.NewModules()),
-		telegraph.Module,
 	)
 }

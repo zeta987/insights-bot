@@ -2,287 +2,148 @@ package chathistories
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/nekomeowww/fo"
 	"github.com/samber/lo"
 	goopenai "github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 
 	"github.com/nekomeowww/insights-bot/ent"
 	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai"
-	"github.com/nekomeowww/insights-bot/pkg/bots/tgbot"
-	"github.com/nekomeowww/insights-bot/pkg/types/telegram"
 )
 
-type RecapOutputTemplateInputs struct {
-	ChatID string
-	Recap  *openai.ChatHistorySummarizationOutputs
-	Model  string
-}
-
-func formatChatID(chatID int64) string {
-	chatIDStr := strconv.FormatInt(chatID, 10)
-	if strings.HasPrefix(chatIDStr, "-100") {
-		return strings.TrimPrefix(chatIDStr, "-100")
+func (m *Model) summarizeChatHistoriesSlice(chatID int64, content string) (string, goopenai.Usage, *openai.RecapExecutionTrace, error) {
+	if strings.TrimSpace(content) == "" {
+		return "", goopenai.Usage{}, &openai.RecapExecutionTrace{}, nil
 	}
 
-	return chatIDStr
-}
-
-var RecapOutputTemplate = lo.Must(template.
-	New("recap output markdown template").
-	Funcs(template.FuncMap{
-		"join":   strings.Join,
-		"sub":    func(a, b int) int { return a - b },
-		"add":    func(a, b int) int { return a + b },
-		"escape": tgbot.EscapeHTMLSymbols,
-	}).
-	Parse(`{{ $chatID := .ChatID }}{{ if .Recap.SinceID }}## <a href="https://t.me/c/{{ $chatID }}/{{ .Recap.SinceID }}">{{ escape .Recap.TopicName }}</a>{{ else }}## {{ escape .Recap.TopicName }}{{ end }}
-参与人：{{ join .Recap.Participants "，" }}
-讨论：{{ range $di, $d := .Recap.Discussion }}
- - {{ escape $d.Point }}{{ if len $d.KeyIDs }} {{ range $cIndex, $c := $d.KeyIDs }}<a href="https://t.me/c/{{ $chatID }}/{{ $c }}">[{{ add $cIndex 1 }}]</a>{{ if not (eq $cIndex (sub (len $d.KeyIDs) 1)) }} {{ end }}{{ end }}{{ end }}{{ end }}{{ if .Recap.Conclusion }}
-结论：{{ escape .Recap.Conclusion }}{{ end }}`))
-
-var RecapWithoutLinksOutputTemplate = lo.Must(template.
-	New("recap output markdown template").
-	Funcs(template.FuncMap{
-		"join":   strings.Join,
-		"sub":    func(a, b int) int { return a - b },
-		"add":    func(a, b int) int { return a + b },
-		"escape": tgbot.EscapeHTMLSymbols,
-	}).
-	Parse(`{{ $chatID := .ChatID }}{{ if .Recap.SinceID }}## {{ escape .Recap.TopicName }}{{ else }}## {{ escape .Recap.TopicName }}{{ end }}
-参与人：{{ join .Recap.Participants "，" }}
-讨论：{{ range $di, $d := .Recap.Discussion }}
- - {{ escape $d.Point }}{{ end }}{{ if .Recap.Conclusion }}
-结论：{{ escape .Recap.Conclusion }}{{ end }}`))
-
-func (m *Model) summarizeChatHistoriesSlice(chatID int64, s string) ([]*openai.ChatHistorySummarizationOutputs, goopenai.Usage, *openai.RecapExecutionTrace, error) {
-	if s == "" {
-		return make([]*openai.ChatHistorySummarizationOutputs, 0), goopenai.Usage{}, &openai.RecapExecutionTrace{}, nil
-	}
-
-	m.logger.Info(fmt.Sprintf("✍️ summarizing chat histories:\n%s", s),
+	m.logger.Info(fmt.Sprintf("✍️ summarizing chat histories:\n%s", content),
 		zap.Int64("chat_id", chatID),
 		zap.String("model_name", m.openAI.GetModelName()),
 	)
 
-	// Use configured language or default to empty string (which will use OpenAI client's default)
 	language := m.config.OpenAI.ChatHistoriesSummarizationLanguage
-
 	recapTrace := &openai.RecapExecutionTrace{}
 	recapCtx := openai.WithRecapExecutionTrace(context.Background(), recapTrace)
 
-	resp, err := m.openAI.SummarizeChatHistories(recapCtx, s, language)
+	response, err := m.openAI.SummarizeChatHistories(recapCtx, content, language)
 	if err != nil {
-		return nil, goopenai.Usage{}, recapTrace, err
+		return "", goopenai.Usage{}, recapTrace, err
 	}
-	if len(resp.Choices) == 0 {
-		return nil, goopenai.Usage{}, recapTrace, nil
+	if len(response.Choices) == 0 {
+		return "", response.Usage, recapTrace, nil
 	}
 
 	usedModel := m.openAI.GetModelName()
-	if resp.Model != "" {
-		usedModel = resp.Model
+	if response.Model != "" {
+		usedModel = response.Model
 	}
-
-	m.logger.Info("✅ summarized chat histories",
-		zap.Int64("chat_id", chatID),
-		zap.String("model_name", usedModel),
-	)
-	if resp.Choices[0].Message.Content == "" {
-		return nil, goopenai.Usage{}, recapTrace, nil
-	}
-
-	var outputs []*openai.ChatHistorySummarizationOutputs
-	resp.Choices[0].Message.Content = strings.TrimPrefix(resp.Choices[0].Message.Content, "```json")
-	resp.Choices[0].Message.Content = strings.TrimPrefix(resp.Choices[0].Message.Content, "```")
-	resp.Choices[0].Message.Content = strings.TrimSuffix(resp.Choices[0].Message.Content, "```")
-
-	err = json.Unmarshal([]byte(resp.Choices[0].Message.Content), &outputs)
-	if err != nil {
-		m.logger.Error("failed to unmarshal chat history summarization output",
-			zap.String("content", resp.Choices[0].Message.Content),
-			zap.Int64("chat_id", chatID),
-			zap.String("model_name", usedModel),
-		)
-
-		return nil, resp.Usage, recapTrace, err
-	}
-
-	m.logger.Info(fmt.Sprintf("✅ unmarshaled chat history summarization output: %s", fo.May(json.Marshal(outputs))),
+	m.logger.Info("✅ summarized chat histories as Rich Markdown",
 		zap.Int64("chat_id", chatID),
 		zap.String("model_name", usedModel),
 	)
 
-	return outputs, resp.Usage, recapTrace, nil
+	return strings.TrimSpace(response.Choices[0].Message.Content), response.Usage, recapTrace, nil
 }
 
-func filterOutInvalidFields(messageIDs []int64) func(output *openai.ChatHistorySummarizationOutputs, _ int) *openai.ChatHistorySummarizationOutputs {
-	return func(output *openai.ChatHistorySummarizationOutputs, _ int) *openai.ChatHistorySummarizationOutputs {
-		// limit key ids to 5
-		output.Participants = lo.Uniq(output.Participants)
+func mergeUniqueTraceText(current, incoming string) string {
+	incoming = strings.TrimSpace(incoming)
+	if incoming == "" {
+		return current
+	}
+	if strings.TrimSpace(current) == "" {
+		return incoming
+	}
 
-		// filter out non-exist message ids
-		for _, d := range output.Discussion {
-			d.KeyIDs = lo.Filter(d.KeyIDs, func(item int64, _ int) bool {
-				return lo.Contains(messageIDs, item) && item != 0
-			})
-			d.KeyIDs = lo.UniqBy(d.KeyIDs, func(item int64) int64 {
-				return item
-			})
-
-			if len(d.KeyIDs) > 5 {
-				d.KeyIDs = d.KeyIDs[:5]
-			}
+	for _, existing := range strings.Split(current, ", ") {
+		if existing == incoming {
+			return current
 		}
-
-		output.Discussion = lo.Filter(output.Discussion, func(item *openai.ChatHistorySummarizationOutputsDiscussion, _ int) bool {
-			return len(item.KeyIDs) > 0 && item.Point != ""
-		})
-
-		return output
 	}
+	return current + ", " + incoming
 }
 
-func filterOutInvalidOutputFilterFunc(output *openai.ChatHistorySummarizationOutputs, _ int) bool {
-	return output != nil &&
-		output.TopicName != "" && // filter out empty topic name
-		output.SinceID != 0 && // filter out empty since id
-		len(output.Participants) > 0 && // filter out empty participants
-		len(output.Discussion) > 0 // filter out empty discussion
+func mergeGenerationModelExecutionTrace(dst *openai.GenerationModelExecutionTrace, src openai.GenerationModelExecutionTrace) {
+	dst.PrimaryModel = mergeUniqueTraceText(dst.PrimaryModel, src.PrimaryModel)
+	dst.PrimaryUsedModel = mergeUniqueTraceText(dst.PrimaryUsedModel, src.PrimaryUsedModel)
+	dst.PrimaryFailed = dst.PrimaryFailed || src.PrimaryFailed
+	dst.PrimaryFailureReason = mergeUniqueTraceText(dst.PrimaryFailureReason, src.PrimaryFailureReason)
+	dst.BackupModel = mergeUniqueTraceText(dst.BackupModel, src.BackupModel)
+	dst.BackupUsedModel = mergeUniqueTraceText(dst.BackupUsedModel, src.BackupUsedModel)
+	dst.BackupUsed = dst.BackupUsed || src.BackupUsed
+	dst.BackupSucceeded = dst.BackupSucceeded || src.BackupSucceeded
+	dst.BackupFailureReason = mergeUniqueTraceText(dst.BackupFailureReason, src.BackupFailureReason)
 }
 
-func filterOutMention(output *openai.ChatHistorySummarizationOutputs, _ int) *openai.ChatHistorySummarizationOutputs {
-	output.Participants = lo.Map(output.Participants, func(item string, _ int) string {
-		item = strings.TrimPrefix(item, "@")
-		return tgbot.EscapeHTMLSymbols(item)
-	})
-
-	return output
+func mergeRecapExecutionTrace(dst, src *openai.RecapExecutionTrace) {
+	if dst == nil || src == nil {
+		return
+	}
+	mergeGenerationModelExecutionTrace(&dst.Generation, src.Generation)
 }
 
-func (m *Model) summarizeChatHistories(chatID int64, messageIDs []int64, llmFriendlyChatHistories string) ([]*openai.ChatHistorySummarizationOutputs, goopenai.Usage, *openai.RecapExecutionTrace, error) {
+func (m *Model) summarizeChatHistories(chatID int64, llmFriendlyChatHistories string) ([]string, goopenai.Usage, *openai.RecapExecutionTrace, error) {
 	tokenLimit := m.config.OpenAI.TokenLimit - m.config.OpenAI.ChatHistoriesRecapTokenLimit
 	chatHistoriesSlices := m.openAI.SplitContentBasedByTokenLimitations(llmFriendlyChatHistories, int(tokenLimit))
-	chatHistoriesSummarizations := make([]*openai.ChatHistorySummarizationOutputs, 0, len(chatHistoriesSlices))
-	latestTrace := &openai.RecapExecutionTrace{}
+	summaries := make([]string, 0, len(chatHistoriesSlices))
+	aggregatedTrace := &openai.RecapExecutionTrace{}
 
-	var statusUsage goopenai.Usage
-
-	for _, s := range chatHistoriesSlices {
-		var outputs []*openai.ChatHistorySummarizationOutputs
+	var totalUsage goopenai.Usage
+	for _, content := range chatHistoriesSlices {
+		var summary string
+		var lastTrace *openai.RecapExecutionTrace
+		var successfulTrace *openai.RecapExecutionTrace
 
 		_, _, err := lo.AttemptWithDelay(5, time.Second, func(tried int, delay time.Duration) error {
-			o, usage, recapTrace, err := m.summarizeChatHistoriesSlice(chatID, s)
-			if recapTrace != nil {
-				latestTrace = recapTrace
-			}
-			statusUsage.CompletionTokens += usage.CompletionTokens
-			statusUsage.PromptTokens += usage.PromptTokens
-			statusUsage.TotalTokens += usage.TotalTokens
+			generated, usage, recapTrace, summarizeErr := m.summarizeChatHistoriesSlice(chatID, content)
+			lastTrace = recapTrace
+			totalUsage.CompletionTokens += usage.CompletionTokens
+			totalUsage.PromptTokens += usage.PromptTokens
+			totalUsage.TotalTokens += usage.TotalTokens
 
-			if err != nil {
-				m.logger.Error(fmt.Sprintf("failed to summarize chat histories slice: %s, tried %d...", s, tried),
+			if summarizeErr != nil {
+				m.logger.Error(fmt.Sprintf("failed to summarize chat histories slice: %s, tried %d...", content, tried),
 					zap.Int64("chat_id", chatID),
 					zap.String("model_name", m.openAI.GetModelName()),
 					zap.Int64("configured_chat_histories_recap_token_limit", m.config.OpenAI.ChatHistoriesRecapTokenLimit),
 					zap.Int64("configured_token_limit", m.config.OpenAI.TokenLimit),
 					zap.Int64("calculated_token_limit", tokenLimit),
 				)
-
-				return err
+				return summarizeErr
 			}
 
-			// filter out invalid fields
-			o = lo.Map(o, filterOutInvalidFields(messageIDs))
-			// filter out empty outputs
-			o = lo.Filter(o, filterOutInvalidOutputFilterFunc)
-			// filter out mentions
-			o = lo.Map(o, filterOutMention)
-
-			if len(o) == 0 {
-				m.logger.Error(fmt.Sprintf("no valid outputs from chat histories slice: %s, tried %d...", s, tried),
-					zap.Int64("chat_id", chatID),
-					zap.String("model_name", m.openAI.GetModelName()),
-					zap.Int64("configured_chat_histories_recap_token_limit", m.config.OpenAI.ChatHistoriesRecapTokenLimit),
-					zap.Int64("configured_token_limit", m.config.OpenAI.TokenLimit),
-					zap.Int64("calculated_token_limit", tokenLimit),
-				)
-
-				return errors.New("no valid outputs")
+			if strings.TrimSpace(generated) == "" {
+				return errors.New("recap model returned empty Rich Markdown")
 			}
 
-			outputs = o
-
+			summary = generated
+			successfulTrace = recapTrace
 			return nil
 		})
 		if err != nil {
-			return make([]*openai.ChatHistorySummarizationOutputs, 0), goopenai.Usage{}, latestTrace, err
+			mergeRecapExecutionTrace(aggregatedTrace, lastTrace)
+			return []string{}, totalUsage, aggregatedTrace, err
 		}
-		if outputs == nil {
-			continue
-		}
-
-		chatHistoriesSummarizations = append(chatHistoriesSummarizations, outputs...)
-	}
-
-	return chatHistoriesSummarizations, statusUsage, latestTrace, nil
-}
-
-func (m *Model) renderRecapTemplates(chatID int64, chatType telegram.ChatType, summarizations []*openai.ChatHistorySummarizationOutputs) ([]string, error) {
-	ss := make([]string, 0)
-
-	for _, r := range summarizations {
-		sb := new(strings.Builder)
-
-		switch chatType {
-		case telegram.ChatTypeSuperGroup:
-			err := RecapOutputTemplate.Execute(sb, RecapOutputTemplateInputs{
-				ChatID: formatChatID(chatID),
-				Recap:  r,
-				Model:  m.openAI.GetModelName(),
-			})
-			if err != nil {
-				return make([]string, 0), err
-			}
-
-			ss = append(ss, sb.String())
-		case telegram.ChatTypePrivate, telegram.ChatTypeGroup, telegram.ChatTypeChannel:
-			err := RecapWithoutLinksOutputTemplate.Execute(sb, RecapOutputTemplateInputs{
-				ChatID: formatChatID(chatID),
-				Recap:  r,
-				Model:  m.openAI.GetModelName(),
-			})
-			if err != nil {
-				return make([]string, 0), err
-			}
-
-			ss = append(ss, sb.String())
+		mergeRecapExecutionTrace(aggregatedTrace, successfulTrace)
+		if summary != "" {
+			summaries = append(summaries, summary)
 		}
 	}
 
-	return ss, nil
+	return summaries, totalUsage, aggregatedTrace, nil
 }
 
-// GenSarcasticCondensed 生成一個用於聊天歷史的銳評式濃縮總結
+// GenSarcasticCondensed generates the first-stage condensed recap text.
 func (m *Model) GenSarcasticCondensed(chatID int64, histories []*ent.ChatHistories) (string, *openai.CondensedExecutionTrace, error) {
 	if len(histories) == 0 {
 		return "", &openai.CondensedExecutionTrace{}, fmt.Errorf("no chat histories")
 	}
 
-	// 將歷史訊息轉為文本格式
 	builder := strings.Builder{}
-
 	for i, history := range histories {
-		// 格式化訊息，類似於convertHistoriesToLLMFriendlyChatHistories的邏輯
 		userName := history.FullName
 		if userName == "" {
 			userName = history.Username
@@ -293,19 +154,25 @@ func (m *Model) GenSarcasticCondensed(chatID int64, histories []*ent.ChatHistori
 
 		messageText := history.Text
 		if messageText == "" {
-			// 跳過空內容
 			continue
 		}
 
-		// 添加每條訊息
 		builder.WriteString(fmt.Sprintf("[%d] %s: %s\n", i+1, userName, messageText))
 	}
 
-	// 調用OpenAI生成銳評總結
+	return m.GenSarcasticCondensedFromText(chatID, builder.String())
+}
+
+// GenSarcasticCondensedFromText runs the independent condensed-summary stage
+// for recap sources that are not stored as Ent chat histories.
+func (m *Model) GenSarcasticCondensedFromText(chatID int64, chatHistory string) (string, *openai.CondensedExecutionTrace, error) {
+	if strings.TrimSpace(chatHistory) == "" {
+		return "", &openai.CondensedExecutionTrace{}, fmt.Errorf("no chat history text")
+	}
+
 	condensedTrace := &openai.CondensedExecutionTrace{}
 	condensedCtx := openai.WithCondensedExecutionTrace(context.Background(), condensedTrace)
-
-	result, err := m.openAI.SarcasticCondense(condensedCtx, builder.String())
+	result, err := m.openAI.SarcasticCondense(condensedCtx, chatHistory)
 	if err != nil {
 		m.logger.Error("failed to generate sarcastic condensed summary",
 			zap.Int64("chat_id", chatID),

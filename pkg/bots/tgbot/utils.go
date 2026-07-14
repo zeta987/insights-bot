@@ -98,32 +98,6 @@ func RemoveHTMLBlocksFromString(str string) string {
 	return str
 }
 
-var (
-	matchMdTitles = regexp.MustCompile(`(?m)^(#){1,6} (.)*(\n)?`)
-)
-
-func ReplaceMarkdownTitlesToTelegramBoldElement(text string) string {
-	return matchMdTitles.ReplaceAllStringFunc(text, func(s string) string {
-		// remove hashtag
-		for strings.HasPrefix(s, "#") {
-			s = strings.TrimPrefix(s, "#")
-		}
-		// remove space
-		s = strings.TrimPrefix(s, " ")
-
-		sRunes := []rune(s)
-		ret := "<b>" + string(sRunes[:len(sRunes)-1])
-
-		// if the line ends with a newline, add a newline to the end of the bold element
-		if strings.HasSuffix(s, "\n") {
-			return ret + "</b>\n"
-		}
-
-		// otherwise, just return the bold element
-		return ret + string(sRunes[len(sRunes)-1]) + "</b>"
-	})
-}
-
 func MapChatTypeToChineseText(chatType telegram.ChatType) string {
 	switch chatType {
 	case telegram.ChatTypePrivate:
