@@ -26,9 +26,9 @@
   </a>
 </p>
 
-一个能通过与 OpenAI GPT 模型交互来为你的信息流提供洞察的机器人。
+[正體中文](./README.zh-TW.md) | **简体中文** | [English](./README.md)
 
-[English Documentation](./README.md)
+一个能通过与 OpenAI GPT 模型交互来为你的信息流提供洞察的机器人。
 
 ---
 
@@ -37,6 +37,16 @@
 - Telegram
 - Slack
 - Discord
+
+---
+
+## 版本发布
+
+本 fork 的聊天记录回顾现在以 Telegram 原生 Rich Messages 直接发送，基于 Telegram Bot API 10.1（2026-06-11）的富文本消息能力，由 Telegram Desktop 6.9 系列客户端渲染，取代了此前的 Telegraph 页面方案。
+
+- v0.1.0 — 2026-07-14：首个 fork 正式版本，引入原生 Rich Message 回顾、浓缩与详细双层总结、备用模型链，并移除 Telegraph 集成。
+
+详情见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ---
 
@@ -182,7 +192,7 @@ $ ./insights-bot
 ### 使用 Docker 运行
 
 ```shell
-docker run -it --rm -e TELEGRAM_BOT_TOKEN=<Telegram Bot API 令牌> -e OPENAI_API_SECRET=<OpenAI API 密钥y> -e DB_CONNECTION_STR="<PostgresSQL 连接 URL>" insights-bot ghcr.io/nekomeowww/insights-bot:latest
+docker run -it --rm -e TELEGRAM_BOT_TOKEN=<Telegram Bot API 令牌> -e OPENAI_API_SECRET=<OpenAI API 密钥> -e DB_CONNECTION_STR="<PostgresSQL 连接 URL>" insights-bot ghcr.io/nekomeowww/insights-bot:latest
 ```
 
 ### 使用 Docker Compose 运行
