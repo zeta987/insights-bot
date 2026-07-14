@@ -100,6 +100,46 @@ func TestSanitizeDetailedRecapMarkdownAllowsOnlyControlledLinksAndBlocks(t *test
 	require.NotContains(t, resolved, "https://example.org")
 }
 
+func TestSanitizeDetailedRecapMarkdownNeutralizesMentions(t *testing.T) {
+	raw := "## Topic\n\n" +
+		"- @alice and @bob_dev pinged @ChannelName\n" +
+		"- (@carol) replied, 感謝@eve 支援\n" +
+		"- @@dave escalated\n" +
+		"@lead_1 opened the thread\n\n" +
+		"contact admin@example.com for access"
+
+	sanitized := SanitizeDetailedRecapMarkdown(raw)
+
+	require.NotContains(t, sanitized, "@alice")
+	require.NotContains(t, sanitized, "@bob_dev")
+	require.NotContains(t, sanitized, "@ChannelName")
+	require.NotContains(t, sanitized, "@carol")
+	require.NotContains(t, sanitized, "@eve")
+	require.NotContains(t, sanitized, "@dave")
+	require.NotContains(t, sanitized, "@lead_1")
+	require.Contains(t, sanitized, "- alice and bob_dev pinged ChannelName")
+	require.Contains(t, sanitized, "- (carol) replied, 感謝eve 支援")
+	require.Contains(t, sanitized, "- dave escalated")
+	require.Contains(t, sanitized, "lead_1 opened the thread")
+	require.Contains(t, sanitized, "admin@example.com")
+}
+
+func TestSanitizeCondensedRecapMarkdownNeutralizesMentions(t *testing.T) {
+	raw := "# 主題\n\n" +
+		"- **參與者**：@alice、@bob_dev\n" +
+		"- 結論由 @@carol 拍板\n\n" +
+		"回報請寄 support@example.com"
+
+	sanitized := SanitizeCondensedRecapMarkdown(raw)
+
+	require.NotContains(t, sanitized, "@alice")
+	require.NotContains(t, sanitized, "@bob_dev")
+	require.NotContains(t, sanitized, "@carol")
+	require.Contains(t, sanitized, "- **參與者**：alice、bob_dev")
+	require.Contains(t, sanitized, "- 結論由 carol 拍板")
+	require.Contains(t, sanitized, "support@example.com")
+}
+
 func TestSanitizeCondensedRecapMarkdownPreservesReadableRichStructure(t *testing.T) {
 	input := "# 測試主題\n\n- **觸發方式**：/recap\n\n| 指標 | 數值 |\n| --- | --- |\n| 次數 | 4 |\n\n<a href=\"https://evil.example\">補充</a>"
 

@@ -26,6 +26,12 @@ var richMarkdownHTMLTagPattern = regexp.MustCompile(`(?i)</?[a-z][^>\r\n]*>`)
 var richMarkdownInlineLinkPattern = regexp.MustCompile(`!?\[([^\]\r\n]+)\]\([^)\r\n]+\)`)
 var richMarkdownBareURLPattern = regexp.MustCompile(`https?://[^\s<>()]+`)
 
+// Telegram parses "@word" as a live mention entity only when the "@" sits at
+// the start of the text or after a non-word character, so email-like tokens
+// (word character before "@") stay untouched. "@+" collapses stacked "@@name"
+// so stripping can never leave a fresh mention behind.
+var richMarkdownMentionPattern = regexp.MustCompile(`(^|[^0-9A-Za-z_])@+([0-9A-Za-z_])`)
+
 var richMarkdownProtectedSpanPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`!?\[[^\]\r\n]*\]\([^)\s]+\)`),
 	regexp.MustCompile(`\*\*((?:\\.|[^*\r\n])*)\*\*`),
@@ -84,6 +90,7 @@ func SanitizeDetailedRecapMarkdown(markdown string) string {
 	markdown = richMarkdownInlineLinkPattern.ReplaceAllString(markdown, "$1")
 	markdown = richMarkdownHTMLTagPattern.ReplaceAllString(markdown, "")
 	markdown = richMarkdownBareURLPattern.ReplaceAllString(markdown, "")
+	markdown = neutralizeRichMarkdownMentions(markdown)
 
 	lines := strings.Split(markdown, "\n")
 	sanitizedLines := make([]string, 0, len(lines))
@@ -115,6 +122,7 @@ func SanitizeCondensedRecapMarkdown(markdown string) string {
 	markdown = richMarkdownInlineLinkPattern.ReplaceAllString(markdown, "$1")
 	markdown = richMarkdownHTMLTagPattern.ReplaceAllString(markdown, "")
 	markdown = richMarkdownBareURLPattern.ReplaceAllString(markdown, "")
+	markdown = neutralizeRichMarkdownMentions(markdown)
 
 	lines := strings.Split(markdown, "\n")
 	sanitizedLines := make([]string, 0, len(lines))
@@ -238,6 +246,12 @@ func ComposeRichRecapMessages(condensedSummary string, detailedSummaries []strin
 	}
 
 	return messages
+}
+
+// neutralizeRichMarkdownMentions drops the "@" prefix from model-emitted
+// @username tokens so recap deliveries never notify the mentioned users.
+func neutralizeRichMarkdownMentions(markdown string) string {
+	return richMarkdownMentionPattern.ReplaceAllString(markdown, "${1}${2}")
 }
 
 func normalizeRichMarkdown(markdown string) string {
