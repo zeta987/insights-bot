@@ -214,14 +214,14 @@ func TestSendRichRecapPartsSplitsPlainTextFallbackAndRepliesToFirstMessage(t *te
 			Message: "Bad Request: invalid rich message markdown",
 		}},
 	}
-	rich := "<details><summary>詳細總結</summary>\n\n" + strings.Repeat("界", PlainTextLimit+10) + "\n\n</details>"
+	rich := "<details><summary>詳細總結</summary>\n\n" + strings.Repeat("界", tgbot.MessageLengthLimit+10) + "\n\n</details>"
 
 	messages, err := SendRichRecapParts(sender, Config{ChatID: 123, Parts: []string{rich}})
 	require.NoError(t, err)
 	require.Len(t, sender.plain, 2)
 	assert.Len(t, messages, 2)
 	for _, config := range sender.plain {
-		assert.LessOrEqual(t, utf8.RuneCountInString(config.Text), PlainTextLimit)
+		assert.LessOrEqual(t, utf8.RuneCountInString(config.Text), tgbot.MessageLengthLimit)
 	}
 	assert.Zero(t, sender.plain[0].ReplyToMessageID)
 	assert.Equal(t, messages[0].MessageID, sender.plain[1].ReplyToMessageID)
@@ -273,7 +273,7 @@ func TestRichRecapSummaryFallsBackToCompleteSegmentedPlainText(t *testing.T) {
 	plainTexts := make([]string, 0, len(sender.plain))
 	for index, config := range sender.plain {
 		plainTexts = append(plainTexts, config.Text)
-		require.LessOrEqual(t, utf8.RuneCountInString(config.Text), PlainTextLimit)
+		require.LessOrEqual(t, utf8.RuneCountInString(config.Text), tgbot.MessageLengthLimit)
 		if index == 0 {
 			require.Equal(t, keyboard, config.ReplyMarkup)
 			require.Equal(t, 9, config.ReplyToMessageID)
@@ -291,23 +291,4 @@ func TestRichRecapSummaryFallsBackToCompleteSegmentedPlainText(t *testing.T) {
 	require.Contains(t, plain, "Check：checkModel")
 	require.NotContains(t, plain, "> ")
 	require.Contains(t, plain, "1 (https://t.me/c/123/45)")
-}
-
-func TestSplitPlainTextKeepsCitationLabelAndURLTogether(t *testing.T) {
-	citation := "1 (https://t.me/c/123/456)"
-	text := strings.Repeat("a", PlainTextLimit-10) + " " + citation
-
-	parts := splitPlainText(text)
-	require.Len(t, parts, 2)
-	assert.NotContains(t, parts[0], "https://")
-	assert.Equal(t, citation, parts[1])
-	for _, part := range parts {
-		assert.LessOrEqual(t, utf8.RuneCountInString(part), PlainTextLimit)
-	}
-}
-
-func TestRichMarkdownToPlainTextKeepsTelegramUserLabelWithoutTarget(t *testing.T) {
-	rich := "# 🧾 聊天回顧\n\n_用戶 [TestUser](tg://user?id=42) 發起 **1 小時**總結_"
-
-	require.Equal(t, "🧾 聊天回顧\n\n用戶 TestUser 發起 1 小時總結", richMarkdownToPlainText(rich))
 }
