@@ -35,7 +35,6 @@ const (
 	EnvCheckModel                                = "CHECK_MODEL"
 	EnvCheckModelBackup                          = "CHECK_MODEL_backup"
 	EnvOpenAICheckModelForceFailure              = "OPENAI_FORCE_CHECK_MODEL_FAILURE"
-	EnvOpenAIForceInvalidRecapJSONForTest        = "OPENAI_FORCE_INVALID_RECAP_JSON_FOR_TEST"
 	EnvOpenAIForceCondensedPrimaryFailureForTest = "OPENAI_FORCE_CONDENSED_PRIMARY_FAILURE_FOR_TEST"
 	EnvOpenAIVerbosePayloadLogs                  = "OPENAI_VERBOSE_PAYLOAD_LOGS"
 
@@ -62,17 +61,9 @@ const (
 
 	EnvLocalesDir = "LOCALES_DIR"
 
-	EnvTelegraphAccessToken = "TELEGRAPH_ACCESS_TOKEN"
-	EnvTelegraphApiUrl      = "TELEGRAPH_API_URL"
-	EnvTelegraphTimeoutSec  = "TELEGRAPH_TIMEOUT_SEC"
-
 	// Auto recap testing
 	EnvAutoRecapTestChatID  = "AUTO_RECAP_TEST_CHAT_ID"
 	EnvAutoRecapTestEnabled = "AUTO_RECAP_TEST_ENABLED"
-
-	// Telegraph large content paging test
-	EnvTelegraphPagingTestEnabled = "TELEGRAPH_PAGING_TEST_ENABLED"
-	EnvTelegraphPagingTestFile    = "TELEGRAPH_PAGING_TEST_FILE"
 
 	// Sarcastic condensed system prompt
 	EnvSarcasticCondensedSystemPrompt = "SARCASTIC_CONDENSED_SYSTEM_PROMPT"
@@ -147,23 +138,15 @@ type SectionOpenAI struct {
 	CheckModelName                      string
 	CheckModelNameBackup                string
 	ForceCheckModelFailure              bool
-	ForceInvalidRecapJSONForTest        bool
 	ForceCondensedPrimaryFailureForTest bool
 	EnableVerbosePayloadLogs            bool
 	ChatHistoriesSummarizationLanguage  string
-}
-
-type SectionTelegraph struct {
-	AccessToken string
-	ApiUrl      string
-	TimeoutSec  int
 }
 
 type Config struct {
 	TimezoneShiftSeconds int64
 	Telegram             SectionTelegram
 	OpenAI               SectionOpenAI
-	Telegraph            SectionTelegraph
 	Pinecone             SectionPinecone
 	CloverDBPath         string
 	DB                   SectionDB
@@ -178,10 +161,6 @@ type Config struct {
 	// Auto recap testing
 	AutoRecapTestChatID  int64
 	AutoRecapTestEnabled bool
-
-	// Telegraph paging test switch
-	TelegraphPagingTestEnabled bool
-	TelegraphPagingTestFile    string
 
 	// Sarcastic condensed system prompt
 	SarcasticCondensedSystemPrompt string
@@ -251,11 +230,6 @@ func NewConfig() func() (*Config, error) {
 			log.Printf("%s value %v is greater than token limit, fallbacks to %v", EnvOpenAIAPIChatHistoriesRecapTokenLimit, getEnv(EnvOpenAIAPIChatHistoriesRecapTokenLimit), tokenLimit)
 		}
 
-		telegraphTimeout, telegraphTimeoutErr := strconv.Atoi(getEnv(EnvTelegraphTimeoutSec))
-		if telegraphTimeoutErr != nil || telegraphTimeout <= 0 {
-			telegraphTimeout = 10
-		}
-
 		autoRecapTestChatID, _ := strconv.ParseInt(getEnv(EnvAutoRecapTestChatID), 10, 64)
 		autoRecapTestEnabled := getEnv(EnvAutoRecapTestEnabled) == "true" || getEnv(EnvAutoRecapTestEnabled) == "1"
 
@@ -284,15 +258,9 @@ func NewConfig() func() (*Config, error) {
 				CheckModelName:                      getEnv(EnvCheckModel),
 				CheckModelNameBackup:                getEnv(EnvCheckModelBackup),
 				ForceCheckModelFailure:              getEnv(EnvOpenAICheckModelForceFailure) == "true" || getEnv(EnvOpenAICheckModelForceFailure) == "1",
-				ForceInvalidRecapJSONForTest:        getEnv(EnvOpenAIForceInvalidRecapJSONForTest) == "true" || getEnv(EnvOpenAIForceInvalidRecapJSONForTest) == "1",
 				ForceCondensedPrimaryFailureForTest: getEnv(EnvOpenAIForceCondensedPrimaryFailureForTest) == "true" || getEnv(EnvOpenAIForceCondensedPrimaryFailureForTest) == "1",
 				EnableVerbosePayloadLogs:            getEnv(EnvOpenAIVerbosePayloadLogs) == "true" || getEnv(EnvOpenAIVerbosePayloadLogs) == "1",
 				ChatHistoriesSummarizationLanguage:  getEnv(EnvChatHistoriesSummarizationLanguage),
-			},
-			Telegraph: SectionTelegraph{
-				AccessToken: getEnv(EnvTelegraphAccessToken),
-				ApiUrl:      lo.Ternary(getEnv(EnvTelegraphApiUrl) == "", "https://api.telegra.ph", getEnv(EnvTelegraphApiUrl)),
-				TimeoutSec:  telegraphTimeout,
 			},
 			Pinecone: SectionPinecone{
 				ProjectName: getEnv(EnvPineconeProjectName),
@@ -328,8 +296,6 @@ func NewConfig() func() (*Config, error) {
 			LocalesDir:                     getEnv(EnvLocalesDir),
 			AutoRecapTestChatID:            autoRecapTestChatID,
 			AutoRecapTestEnabled:           autoRecapTestEnabled,
-			TelegraphPagingTestEnabled:     getEnv(EnvTelegraphPagingTestEnabled) == "true" || getEnv(EnvTelegraphPagingTestEnabled) == "1",
-			TelegraphPagingTestFile:        getEnv(EnvTelegraphPagingTestFile),
 			SarcasticCondensedSystemPrompt: getEnv(EnvSarcasticCondensedSystemPrompt),
 			SarcasticCondensedUserPrompt:   getEnv(EnvSarcasticCondensedUserPrompt),
 		}, nil

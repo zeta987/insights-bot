@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -48,7 +47,6 @@ type OpenAIClient struct {
 	sarcasticCondensedModelBackup       string
 	checkModelName                      string
 	checkModelNameBackup                string
-	forceInvalidRecapJSONForTest        bool
 	forceCondensedPrimaryFailureForTest bool
 	forceCheckModelFailure              bool
 	enableVerbosePayloadLogs            bool
@@ -61,10 +59,6 @@ type OpenAIClient struct {
 	limiter                     ratelimit.Limiter
 	enableMetricRecordForTokens bool
 }
-
-var trailingCommaPattern = regexp.MustCompile(`,\s*([}\]])`)
-
-const forcedInvalidRecapJSONForTestPayload = "```json,\n\n&nbsp;   \"discussion\":\n\n&nbsp;     },\n\n&nbsp;     {\n\n&nbsp;       \"point\": \"The AI requires a dialogue transcript or document to analyze and extract the requested discussion topics.\",\n\n&nbsp;       \"keyIds\":\n\n&nbsp;     }\n\n&nbsp;   ],\n\n&nbsp;   \"conclusion\": \"Please provide the chat history so that I can process it and generate the summarized outline according to your JSON schema.\"\n\n&nbsp; }\n\n]\n\n```"
 
 func parseOpenAIAPIHost(apiHost string) (string, error) {
 	if !strings.HasPrefix(apiHost, "https://") && !strings.HasPrefix(apiHost, "http://") {
@@ -130,7 +124,6 @@ func NewClient(enableMetricRecordForTokens bool) func(NewClientParams) (Client, 
 			sarcasticCondensedModelBackup:       condensedBackupModels,
 			checkModelName:                      checkPrimaryModel,
 			checkModelNameBackup:                checkBackupModels,
-			forceInvalidRecapJSONForTest:        params.Config.OpenAI.ForceInvalidRecapJSONForTest,
 			forceCondensedPrimaryFailureForTest: params.Config.OpenAI.ForceCondensedPrimaryFailureForTest,
 			forceCheckModelFailure:              params.Config.OpenAI.ForceCheckModelFailure,
 			enableVerbosePayloadLogs:            params.Config.OpenAI.EnableVerbosePayloadLogs,
@@ -235,63 +228,6 @@ func (c *OpenAIClient) checkBackupModels() []string {
 	return filterBackupModels(c.checkModelNameBackup, c.checkModelName)
 }
 
-func cleanJSONResponseContent(content string) string {
-	cleaned := strings.TrimSpace(content)
-	cleaned = strings.TrimPrefix(cleaned, "\ufeff")
-
-	if strings.HasPrefix(cleaned, "```json") {
-		cleaned = strings.TrimPrefix(cleaned, "```json")
-	}
-	if strings.HasPrefix(cleaned, "```JSON") {
-		cleaned = strings.TrimPrefix(cleaned, "```JSON")
-	}
-	if strings.HasPrefix(cleaned, "```") {
-		cleaned = strings.TrimPrefix(cleaned, "```")
-	}
-	cleaned = strings.TrimSpace(cleaned)
-	if strings.HasSuffix(cleaned, "```") {
-		cleaned = strings.TrimSuffix(cleaned, "```")
-	}
-	cleaned = strings.TrimSpace(cleaned)
-	cleaned = strings.ReplaceAll(cleaned, "&nbsp;", " ")
-
-	start := strings.Index(cleaned, "[")
-	end := strings.LastIndex(cleaned, "]")
-	if start >= 0 && end > start {
-		cleaned = cleaned[start : end+1]
-	}
-
-	return strings.TrimSpace(cleaned)
-}
-
-func forceRepairSummaryJSON(content string) string {
-	repaired := cleanJSONResponseContent(content)
-	repaired = trailingCommaPattern.ReplaceAllString(repaired, "$1")
-	repaired = strings.TrimSpace(strings.TrimPrefix(repaired, ","))
-	repaired = strings.TrimSpace(strings.TrimSuffix(repaired, ","))
-
-	return repaired
-}
-
-func validateAndCompactSummaryJSON(content string) (string, error) {
-	candidate := strings.TrimSpace(content)
-	if candidate == "" {
-		return "", errors.New("empty json content")
-	}
-
-	var outputs []*ChatHistorySummarizationOutputs
-	if err := json.Unmarshal([]byte(candidate), &outputs); err != nil {
-		return "", err
-	}
-
-	compact := new(bytes.Buffer)
-	if err := json.Compact(compact, []byte(candidate)); err != nil {
-		return "", err
-	}
-
-	return compact.String(), nil
-}
-
 func normalizeCondensedDisplayText(content string) string {
 	normalized := strings.TrimSpace(content)
 	normalized = strings.ReplaceAll(normalized, "\r\n", "\n")
@@ -368,6 +304,32 @@ func normalizeCondensedOutputContent(content string) (string, error) {
 	return normalizeCondensedDisplayText(trimmed), nil
 }
 
+func isCondensedUnorderedListItem(line string) bool {
+	return strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ")
+}
+
+func normalizeStructuredCondensedOutputContent(content string) (string, error) {
+	normalized, err := normalizeCondensedOutputContent(content)
+	if err != nil {
+		return "", err
+	}
+
+	hasLevelThreeHeading := false
+	hasListItem := false
+	for _, line := range strings.Split(normalized, "\n") {
+		trimmed := strings.TrimSpace(line)
+		hasLevelThreeHeading = hasLevelThreeHeading || strings.HasPrefix(trimmed, "### ")
+		hasListItem = hasListItem || isCondensedUnorderedListItem(trimmed)
+	}
+	if !hasLevelThreeHeading {
+		return "", errors.New("condensed output is missing a level-three heading")
+	}
+	if !hasListItem {
+		return "", errors.New("condensed output is missing an unordered-list item")
+	}
+	return normalized, nil
+}
+
 func (c *OpenAIClient) callChatCompletionWithModel(
 	ctx context.Context,
 	model string,
@@ -432,12 +394,12 @@ func (c *OpenAIClient) logChatCompletionPayload(
 	)
 }
 
-func (c *OpenAIClient) logVerboseJSONBody(stage string, content string) {
+func (c *OpenAIClient) logVerboseTextBody(stage string, content string) {
 	if !c.enableVerbosePayloadLogs {
 		return
 	}
 
-	c.logInfo("openai verbose json content",
+	c.logInfo("openai verbose text content",
 		zap.String("stage", stage),
 		zap.String("content", content),
 	)
@@ -480,7 +442,7 @@ func (c *OpenAIClient) callCheckModelRepairOnce(
 	model string,
 	messages []openai.ChatCompletionMessage,
 	operation string,
-) (string, error) {
+) (string, string, error) {
 	resp, err := c.callChatCompletionWithModelAndVerboseLog(
 		ctx,
 		operation,
@@ -489,91 +451,50 @@ func (c *OpenAIClient) callCheckModelRepairOnce(
 		nil,
 	)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", errors.New("check model returned empty choices")
+		return "", "", errors.New("check model returned empty choices")
 	}
 
-	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
-}
-
-func (c *OpenAIClient) repairSummaryJSONByCheckModel(ctx context.Context, rawJSON string) (string, string, bool, error) {
-	if c.checkModelName == "" {
-		return "", "", false, errors.New("check model is not configured")
+	checked := strings.TrimSpace(resp.Choices[0].Message.Content)
+	normalized, normalizeErr := normalizeStructuredCondensedOutputContent(checked)
+	if normalizeErr != nil {
+		return "", "", fmt.Errorf("check model returned invalid condensed output: %w", normalizeErr)
 	}
 
-	if c.forceCheckModelFailure {
-		c.logWarn("check model repair forced to fail for local validation",
-			zap.String("check_model", c.checkModelName),
-		)
-		return "", "", false, errors.New("check model forced failure via env switch")
+	usedModel := strings.TrimSpace(resp.Model)
+	if usedModel == "" {
+		usedModel = model
 	}
 
-	sb := new(strings.Builder)
-	if err := CheckSummaryJSONUserPrompt.Execute(sb, CheckSummaryJSONInputs{RawJSON: rawJSON}); err != nil {
-		return "", "", false, err
-	}
-
-	messages := []openai.ChatCompletionMessage{
-		{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: CheckSummaryJSONSystemPrompt,
-		},
-		{
-			Role:    openai.ChatMessageRoleUser,
-			Content: sb.String(),
-		},
-	}
-	checked, err := c.callCheckModelRepairOnce(
-		ctx,
-		c.checkModelName,
-		messages,
-		"check_model_repair_primary",
-	)
-	if err == nil {
-		return checked, c.checkModelName, false, nil
-	}
-
-	backupModels := c.checkBackupModels()
-	if len(backupModels) == 0 {
-		return "", "", false, err
-	}
-
-	lastErr := err
-	for idx, backupModel := range backupModels {
-		checked, backupErr := c.callCheckModelRepairOnce(
-			ctx,
-			backupModel,
-			messages,
-			fmt.Sprintf("check_model_repair_backup_%d", idx+1),
-		)
-		if backupErr != nil {
-			lastErr = backupErr
-			continue
-		}
-
-		return checked, backupModel, true, nil
-	}
-
-	return "", "", true, lastErr
+	return normalized, usedModel, nil
 }
 
 func (c *OpenAIClient) repairCondensedOutputByCheckModel(ctx context.Context, rawOutput string) (string, string, bool, error) {
-	if c.checkModelName == "" {
-		return "", "", false, errors.New("check model is not configured")
+	condensedTrace := condensedExecutionTraceFromContext(ctx)
+	var checkTrace *ConditionalModelExecutionTrace
+	if condensedTrace != nil {
+		checkTrace = &condensedTrace.Check
+		checkTrace.Attempted = true
 	}
 
-	if c.forceCheckModelFailure {
-		c.logWarn("check model repair forced to fail for local validation",
-			zap.String("check_model", c.checkModelName),
-		)
-		return "", "", false, errors.New("check model forced failure via env switch")
+	if c.checkModelName == "" {
+		err := errors.New("check model is not configured")
+		if checkTrace != nil {
+			checkTrace.FailureReason = err.Error()
+		}
+		return "", "", false, err
 	}
 
 	sb := new(strings.Builder)
 	if err := CheckCondensedOutputUserPrompt.Execute(sb, CheckCondensedOutputInputs{RawOutput: rawOutput}); err != nil {
+		if checkTrace != nil {
+			checkTrace.Generation.PrimaryFailed = true
+			checkTrace.Generation.PrimaryFailureReason = err.Error()
+			checkTrace.FailureReason = err.Error()
+		}
 		return "", "", false, err
 	}
 
@@ -588,24 +509,47 @@ func (c *OpenAIClient) repairCondensedOutputByCheckModel(ctx context.Context, ra
 		},
 	}
 
-	checked, err := c.callCheckModelRepairOnce(
-		ctx,
-		c.checkModelName,
-		messages,
-		"check_model_condensed_repair_primary",
-	)
+	var checked string
+	var checkUsedModel string
+	var err error
+	if c.forceCheckModelFailure {
+		err = errors.New("check model forced failure via env switch")
+		c.logWarn("check model repair forced to fail for local validation",
+			zap.String("check_model", c.checkModelName),
+		)
+	} else {
+		checked, checkUsedModel, err = c.callCheckModelRepairOnce(
+			ctx,
+			c.checkModelName,
+			messages,
+			"check_model_condensed_repair_primary",
+		)
+	}
 	if err == nil {
-		return checked, c.checkModelName, false, nil
+		if checkTrace != nil {
+			checkTrace.Generation.PrimaryUsedModel = checkUsedModel
+		}
+		return checked, checkUsedModel, false, nil
+	}
+	if checkTrace != nil {
+		checkTrace.Generation.PrimaryFailed = true
+		checkTrace.Generation.PrimaryFailureReason = err.Error()
 	}
 
 	backupModels := c.checkBackupModels()
 	if len(backupModels) == 0 {
+		if checkTrace != nil {
+			checkTrace.FailureReason = err.Error()
+		}
 		return "", "", false, err
+	}
+	if checkTrace != nil {
+		checkTrace.Generation.BackupUsed = true
 	}
 
 	lastErr := err
 	for idx, backupModel := range backupModels {
-		checked, backupErr := c.callCheckModelRepairOnce(
+		checked, backupUsedModel, backupErr := c.callCheckModelRepairOnce(
 			ctx,
 			backupModel,
 			messages,
@@ -613,131 +557,27 @@ func (c *OpenAIClient) repairCondensedOutputByCheckModel(ctx context.Context, ra
 		)
 		if backupErr != nil {
 			lastErr = backupErr
+			if checkTrace != nil {
+				checkTrace.Generation.BackupFailureReason = backupErr.Error()
+			}
 			continue
 		}
 
-		return checked, backupModel, true, nil
+		if checkTrace != nil {
+			checkTrace.Generation.PrimaryUsedModel = ""
+			checkTrace.Generation.BackupUsedModel = backupUsedModel
+			checkTrace.Generation.BackupSucceeded = true
+			checkTrace.Generation.BackupFailureReason = ""
+		}
+		return checked, backupUsedModel, true, nil
 	}
 
+	if checkTrace != nil {
+		checkTrace.Generation.BackupSucceeded = false
+		checkTrace.Generation.BackupFailureReason = lastErr.Error()
+		checkTrace.FailureReason = lastErr.Error()
+	}
 	return "", "", true, lastErr
-}
-
-func (c *OpenAIClient) normalizeSummaryJSONContent(ctx context.Context, content string, trace *RecapExecutionTrace) (string, error) {
-	candidate := cleanJSONResponseContent(content)
-	c.logVerboseJSONBody("normalize.raw_candidate", candidate)
-	compacted, rawErr := validateAndCompactSummaryJSON(candidate)
-	if rawErr == nil {
-		c.logVerboseJSONBody("normalize.raw_compacted", compacted)
-		return compacted, nil
-	}
-	c.logWarn("summary json is invalid, trying force repair",
-		zap.Error(rawErr),
-	)
-
-	repaired := forceRepairSummaryJSON(candidate)
-	c.logVerboseJSONBody("normalize.local_repaired", repaired)
-	compacted, repairedErr := validateAndCompactSummaryJSON(repaired)
-	if repairedErr == nil {
-		c.logInfo("summary json fixed by local force repair")
-		c.logVerboseJSONBody("normalize.local_repaired_compacted", compacted)
-		return compacted, nil
-	}
-	c.logWarn("local force repair failed, trying check model",
-		zap.Error(repairedErr),
-		zap.String("check_model", c.checkModelName),
-	)
-
-	if c.checkModelName != "" {
-		if trace != nil {
-			trace.Check.Model = c.checkModelName
-			trace.Check.BackupModel = c.checkModelNameBackup
-			trace.Check.Attempted = true
-		}
-
-		var checkValidationErr error
-
-		checked, checkUsedModel, checkBackupTried, checkErr := c.repairSummaryJSONByCheckModel(ctx, repaired)
-		checkBackupUsed := checkUsedModel != "" && checkUsedModel != c.checkModelName
-		if trace != nil && checkBackupTried {
-			trace.Check.BackupUsed = true
-		}
-		if trace != nil && checkBackupUsed {
-			trace.Check.BackupUsedModel = checkUsedModel
-		}
-
-		if checkErr == nil {
-			c.logInfo("check model returned repaired summary json",
-				zap.String("check_model", checkUsedModel),
-			)
-			c.logVerboseJSONBody("normalize.check_model_raw", checked)
-			checked = cleanJSONResponseContent(checked)
-			c.logVerboseJSONBody("normalize.check_model_cleaned", checked)
-			if compacted, err := validateAndCompactSummaryJSON(checked); err == nil {
-				c.logVerboseJSONBody("normalize.check_model_compacted", compacted)
-				if trace != nil && !trace.Check.Failed {
-					trace.Check.Succeeded = true
-					if checkBackupUsed {
-						trace.Check.BackupSucceeded = true
-					}
-				}
-				return compacted, nil
-			} else {
-				checkValidationErr = err
-			}
-
-			checked = forceRepairSummaryJSON(checked)
-			c.logVerboseJSONBody("normalize.check_model_force_repaired", checked)
-			if compacted, err := validateAndCompactSummaryJSON(checked); err == nil {
-				c.logInfo("summary json fixed after check model + local repair",
-					zap.String("check_model", checkUsedModel),
-				)
-				c.logVerboseJSONBody("normalize.check_model_force_repaired_compacted", compacted)
-				if trace != nil && !trace.Check.Failed {
-					trace.Check.Succeeded = true
-					if checkBackupUsed {
-						trace.Check.BackupSucceeded = true
-					}
-				}
-				return compacted, nil
-			} else {
-				checkValidationErr = err
-			}
-		} else {
-			c.logWarn("check model failed to repair summary json",
-				zap.Error(checkErr),
-				zap.String("check_model", c.checkModelName),
-			)
-			if trace != nil {
-				trace.Check.Failed = true
-				if trace.Check.FailureReason == "" {
-					trace.Check.FailureReason = checkErr.Error()
-				}
-				if checkBackupTried {
-					trace.Check.BackupUsed = true
-					trace.Check.BackupSucceeded = false
-					trace.Check.BackupFailureReason = checkErr.Error()
-				}
-			}
-		}
-
-		if checkErr == nil && checkValidationErr != nil && trace != nil {
-			trace.Check.Failed = true
-			if trace.Check.FailureReason == "" {
-				trace.Check.FailureReason = checkValidationErr.Error()
-			}
-			if checkBackupUsed {
-				trace.Check.BackupSucceeded = false
-				trace.Check.BackupFailureReason = checkValidationErr.Error()
-			}
-		}
-	} else {
-		c.logWarn("check model is not configured, skip check-model repair")
-		if trace != nil {
-			trace.Check.Model = ""
-		}
-	}
-
-	return "", fmt.Errorf("failed to normalize summary json")
 }
 
 // truncateContentBasedOnTokens 基于 token 计算的方式截断文本。
@@ -957,8 +797,6 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 	if trace != nil {
 		trace.Generation.PrimaryModel = c.modelName
 		trace.Generation.BackupModel = c.modelNameBackup
-		trace.Check.Model = c.checkModelName
-		trace.Check.BackupModel = c.checkModelNameBackup
 	}
 
 	if language == "" {
@@ -989,7 +827,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		},
 	}
 
-	tryRecapBackupModels := func(operationPrefix string, normalize bool) (openai.ChatCompletionResponse, string, string, error) {
+	tryRecapBackupModels := func(operationPrefix string) (openai.ChatCompletionResponse, string, string, error) {
 		var lastErr error
 		for idx, backupModel := range c.recapBackupModels() {
 			backupResp, backupErr := c.callChatCompletionWithModelAndVerboseLog(
@@ -1006,15 +844,6 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 			if len(backupResp.Choices) == 0 || strings.TrimSpace(backupResp.Choices[0].Message.Content) == "" {
 				lastErr = errors.New("backup model returned empty recap content")
 				continue
-			}
-
-			if normalize {
-				normalizedContent, normalizeErr := c.normalizeSummaryJSONContent(ctx, backupResp.Choices[0].Message.Content, trace)
-				if normalizeErr != nil {
-					lastErr = normalizeErr
-					continue
-				}
-				backupResp.Choices[0].Message.Content = normalizedContent
 			}
 
 			usedModel := backupModel
@@ -1054,7 +883,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				zap.Error(err),
 			)
 
-			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_primary_error", true)
+			backupResp, _, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_primary_error")
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
@@ -1067,7 +896,8 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 			usedModel = backupUsedModel
 			if trace != nil {
 				trace.Generation.BackupSucceeded = true
-				trace.Generation.BackupUsedModel = backupRequestedModel
+				trace.Generation.PrimaryUsedModel = ""
+				trace.Generation.BackupUsedModel = backupUsedModel
 			}
 		} else {
 			if trace != nil {
@@ -1086,15 +916,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 			trace.Generation.PrimaryUsedModel = usedModel
 		}
 	}
-	c.logVerboseJSONBody("recap.raw_model_output", lo.Ternary(len(resp.Choices) > 0, resp.Choices[0].Message.Content, ""))
-
-	if c.forceInvalidRecapJSONForTest && len(resp.Choices) > 0 {
-		c.logWarn("force invalid recap json test mode is enabled, overriding model output",
-			zap.String("used_model", usedModel),
-		)
-		resp.Choices[0].Message.Content = forcedInvalidRecapJSONForTestPayload
-		c.logVerboseJSONBody("recap.forced_invalid_output", resp.Choices[0].Message.Content)
-	}
+	c.logVerboseTextBody("recap.raw_model_output", lo.Ternary(len(resp.Choices) > 0, resp.Choices[0].Message.Content, ""))
 
 	if len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
 		if len(c.recapBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
@@ -1109,7 +931,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				zap.String("backup_models", c.modelNameBackup),
 			)
 
-			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_empty_content", true)
+			backupResp, _, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_empty_content")
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
@@ -1122,7 +944,8 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 			usedModel = backupUsedModel
 			if trace != nil {
 				trace.Generation.BackupSucceeded = true
-				trace.Generation.BackupUsedModel = backupRequestedModel
+				trace.Generation.PrimaryUsedModel = ""
+				trace.Generation.BackupUsedModel = backupUsedModel
 			}
 		} else {
 			if trace != nil {
@@ -1130,51 +953,6 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				trace.Generation.PrimaryFailureReason = "primary model returned empty recap content"
 			}
 			return nil, errors.New("primary model returned empty recap content")
-		}
-	}
-
-	if len(resp.Choices) != 0 && strings.TrimSpace(resp.Choices[0].Message.Content) != "" {
-		normalizedContent, normalizeErr := c.normalizeSummaryJSONContent(ctx, resp.Choices[0].Message.Content, trace)
-		if normalizeErr != nil {
-			if len(c.recapBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
-				if trace != nil {
-					trace.Generation.PrimaryFailed = true
-					trace.Generation.PrimaryFailureReason = normalizeErr.Error()
-					trace.Generation.BackupUsed = true
-				}
-
-				c.logger.Warn("failed to normalize summary json on primary model, retrying backup model",
-					zap.String("primary_model", c.modelName),
-					zap.String("backup_models", c.modelNameBackup),
-					zap.String("used_model", usedModel),
-					zap.Error(normalizeErr),
-				)
-
-				backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_normalize_failure", true)
-				if backupErr != nil {
-					if trace != nil {
-						trace.Generation.BackupSucceeded = false
-						trace.Generation.BackupFailureReason = backupErr.Error()
-					}
-					return nil, backupErr
-				}
-
-				resp = backupResp
-				usedModel = backupUsedModel
-				if trace != nil {
-					trace.Generation.BackupSucceeded = true
-					trace.Generation.BackupUsedModel = backupRequestedModel
-				}
-			} else {
-				if trace != nil {
-					trace.Generation.PrimaryFailed = true
-					trace.Generation.PrimaryFailureReason = normalizeErr.Error()
-				}
-				return nil, normalizeErr
-			}
-		} else {
-			resp.Choices[0].Message.Content = normalizedContent
-			c.logVerboseJSONBody("recap.normalized_output", normalizedContent)
 		}
 	}
 
@@ -1211,6 +989,8 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 	if trace != nil {
 		trace.Generation.PrimaryModel = c.sarcasticCondensedModelName
 		trace.Generation.BackupModel = c.sarcasticCondensedModelBackup
+		trace.Check.Generation.PrimaryModel = c.checkModelName
+		trace.Check.Generation.BackupModel = c.checkModelNameBackup
 	}
 
 	if chatHistory == "" {
@@ -1245,6 +1025,9 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 
 		checked, checkUsedModel, checkBackupTried, checkErr := c.repairCondensedOutputByCheckModel(ctx, rawOutput)
 		if checkErr != nil {
+			if trace != nil {
+				trace.Check.FailureReason = checkErr.Error()
+			}
 			c.logWarn("check model failed to repair condensed output",
 				zap.Error(checkErr),
 				zap.String("check_model", c.checkModelName),
@@ -1252,8 +1035,11 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			return "", true, checkErr
 		}
 
-		normalized, normalizeErr := normalizeCondensedOutputContent(checked)
+		normalized, normalizeErr := normalizeStructuredCondensedOutputContent(checked)
 		if normalizeErr != nil {
+			if trace != nil {
+				trace.Check.FailureReason = normalizeErr.Error()
+			}
 			c.logWarn("check model repaired condensed output is still invalid",
 				zap.Error(normalizeErr),
 				zap.String("check_model", checkUsedModel),
@@ -1265,6 +1051,10 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			zap.String("check_model", checkUsedModel),
 			zap.Bool("check_backup_used", checkBackupTried),
 		)
+		if trace != nil {
+			trace.Check.Succeeded = true
+			trace.Check.FailureReason = ""
+		}
 
 		return normalized, true, nil
 	}
@@ -1292,7 +1082,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 				continue
 			}
 
-			normalizedContent, normalizeErr := normalizeCondensedOutputContent(backupResp.Choices[0].Message.Content)
+			normalizedContent, normalizeErr := normalizeStructuredCondensedOutputContent(backupResp.Choices[0].Message.Content)
 			if normalizeErr != nil {
 				usedBackupModel := backupModel
 				if backupResp.Model != "" {
@@ -1333,6 +1123,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 		return openai.ChatCompletionResponse{}, "", "", "", lastErr
 	}
 
+	contentSourceIsBackup := false
 	resp, err := c.callChatCompletionWithModel(
 		ctx,
 		c.sarcasticCondensedModelName,
@@ -1353,19 +1144,20 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 				zap.Error(err),
 			)
 
-			backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+			backupResp, _, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
 					trace.Generation.BackupFailureReason = backupErr.Error()
-					if backupRequestedModel != "" {
-						trace.Generation.BackupUsedModel = backupRequestedModel
+					if backupUsedModel != "" {
+						trace.Generation.BackupUsedModel = backupUsedModel
 					}
 				}
 
 				if strings.TrimSpace(backupInvalidOutput) != "" {
 					resp = backupResp
 					usedModel = backupUsedModel
+					contentSourceIsBackup = true
 				} else {
 					return "", backupErr
 				}
@@ -1374,9 +1166,11 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			if backupErr == nil {
 				resp = backupResp
 				usedModel = backupUsedModel
+				contentSourceIsBackup = true
 				if trace != nil {
 					trace.Generation.BackupSucceeded = true
-					trace.Generation.BackupUsedModel = backupRequestedModel
+					trace.Generation.PrimaryUsedModel = ""
+					trace.Generation.BackupUsedModel = backupUsedModel
 				}
 			}
 		} else {
@@ -1403,19 +1197,20 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			trace.Generation.BackupUsed = true
 		}
 
-		backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+		backupResp, _, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
 		if backupErr != nil {
 			if trace != nil {
 				trace.Generation.BackupSucceeded = false
 				trace.Generation.BackupFailureReason = backupErr.Error()
-				if backupRequestedModel != "" {
-					trace.Generation.BackupUsedModel = backupRequestedModel
+				if backupUsedModel != "" {
+					trace.Generation.BackupUsedModel = backupUsedModel
 				}
 			}
 
 			if strings.TrimSpace(backupInvalidOutput) != "" {
 				resp = backupResp
 				usedModel = backupUsedModel
+				contentSourceIsBackup = true
 			} else {
 				return "", backupErr
 			}
@@ -1424,18 +1219,17 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 		if backupErr == nil {
 			resp = backupResp
 			usedModel = backupUsedModel
+			contentSourceIsBackup = true
 			if trace != nil {
 				trace.Generation.BackupSucceeded = true
-				trace.Generation.BackupUsedModel = backupRequestedModel
+				trace.Generation.PrimaryUsedModel = ""
+				trace.Generation.BackupUsedModel = backupUsedModel
 			}
 		}
 	}
 
 	if resp.Model != "" {
 		usedModel = resp.Model
-	}
-	if trace != nil && !trace.Generation.BackupUsed {
-		trace.Generation.PrimaryUsedModel = usedModel
 	}
 
 	if len(resp.Choices) == 0 || resp.Choices[0].Message.Content == "" {
@@ -1446,19 +1240,20 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 				trace.Generation.BackupUsed = true
 			}
 
-			backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+			backupResp, _, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
 					trace.Generation.BackupFailureReason = backupErr.Error()
-					if backupRequestedModel != "" {
-						trace.Generation.BackupUsedModel = backupRequestedModel
+					if backupUsedModel != "" {
+						trace.Generation.BackupUsedModel = backupUsedModel
 					}
 				}
 
 				if strings.TrimSpace(backupInvalidOutput) != "" {
 					resp = backupResp
 					usedModel = backupUsedModel
+					contentSourceIsBackup = true
 				} else {
 					return "", backupErr
 				}
@@ -1467,9 +1262,11 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			if backupErr == nil {
 				resp = backupResp
 				usedModel = backupUsedModel
+				contentSourceIsBackup = true
 				if trace != nil {
 					trace.Generation.BackupSucceeded = true
-					trace.Generation.BackupUsedModel = backupRequestedModel
+					trace.Generation.PrimaryUsedModel = ""
+					trace.Generation.BackupUsedModel = backupUsedModel
 				}
 			}
 		} else {
@@ -1482,7 +1279,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 	}
 
 	var invalidOutputForRepair string
-	normalizedContent, normalizeErr := normalizeCondensedOutputContent(resp.Choices[0].Message.Content)
+	normalizedContent, normalizeErr := normalizeStructuredCondensedOutputContent(resp.Choices[0].Message.Content)
 	if normalizeErr == nil {
 		resp.Choices[0].Message.Content = normalizedContent
 	} else {
@@ -1491,6 +1288,10 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			zap.String("used_model", usedModel),
 			zap.Error(normalizeErr),
 		)
+		if trace != nil && !trace.Generation.BackupUsed {
+			trace.Generation.PrimaryFailed = true
+			trace.Generation.PrimaryFailureReason = normalizeErr.Error()
+		}
 
 		if len(c.condensedBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
 			if trace != nil {
@@ -1506,27 +1307,30 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 				zap.Error(normalizeErr),
 			)
 
-			backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+			backupResp, _, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
 			if backupErr == nil {
 				resp = backupResp
 				usedModel = backupUsedModel
+				contentSourceIsBackup = true
 				if trace != nil {
 					trace.Generation.BackupSucceeded = true
-					trace.Generation.BackupUsedModel = backupRequestedModel
+					trace.Generation.PrimaryUsedModel = ""
+					trace.Generation.BackupUsedModel = backupUsedModel
 				}
 				normalizeErr = nil
 			} else {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
 					trace.Generation.BackupFailureReason = backupErr.Error()
-					if backupRequestedModel != "" {
-						trace.Generation.BackupUsedModel = backupRequestedModel
+					if backupUsedModel != "" {
+						trace.Generation.BackupUsedModel = backupUsedModel
 					}
 				}
 				if strings.TrimSpace(backupInvalidOutput) != "" {
 					invalidOutputForRepair = backupInvalidOutput
 					resp = backupResp
 					usedModel = backupUsedModel
+					contentSourceIsBackup = true
 				}
 			}
 		}
@@ -1548,8 +1352,15 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 		}
 	}
 
-	if trace != nil && trace.Generation.PrimaryUsedModel == "" && !trace.Generation.BackupUsed {
-		trace.Generation.PrimaryUsedModel = usedModel
+	if trace != nil {
+		if contentSourceIsBackup {
+			trace.Generation.PrimaryUsedModel = ""
+			if trace.Generation.BackupUsedModel == "" {
+				trace.Generation.BackupUsedModel = usedModel
+			}
+		} else {
+			trace.Generation.PrimaryUsedModel = usedModel
+		}
 	}
 
 	if c.enableMetricRecordForTokens {

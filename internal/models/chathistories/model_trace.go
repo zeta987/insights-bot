@@ -1,14 +1,14 @@
 package chathistories
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai"
 )
 
 func pickModelName(candidates ...string) string {
 	for _, candidate := range candidates {
-		if candidate != "" {
+		if strings.TrimSpace(candidate) != "" {
 			return candidate
 		}
 	}
@@ -16,71 +16,73 @@ func pickModelName(candidates ...string) string {
 	return "unknown-model"
 }
 
-func formatGenerationStatusLine(trace *openai.GenerationModelExecutionTrace, summaryName string) string {
+func appendUniqueModelName(models []string, candidate string) []string {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" || candidate == "unknown-model" {
+		return models
+	}
+	for _, model := range models {
+		if model == candidate {
+			return models
+		}
+	}
+	return append(models, candidate)
+}
+
+func generationModelName(trace *openai.GenerationModelExecutionTrace) string {
 	if trace == nil {
-		return fmt.Sprintf("🤖️ %s模型資訊不可用", summaryName)
+		return "資訊不可用"
 	}
 
-	// Prefer configured model names from env for user-facing status text.
-	primaryModel := pickModelName(trace.PrimaryModel, trace.PrimaryUsedModel)
-	backupModel := pickModelName(trace.BackupUsedModel, trace.BackupModel)
-
+	usedModels := make([]string, 0, 2)
+	usedModels = appendUniqueModelName(usedModels, trace.PrimaryUsedModel)
 	if trace.BackupUsed && trace.BackupSucceeded {
-		return fmt.Sprintf("🤖️ 由 %s 生成 %s失敗（備用 %s 成功）", primaryModel, summaryName, backupModel)
+		usedModels = appendUniqueModelName(usedModels, pickModelName(trace.BackupUsedModel, trace.BackupModel))
 	}
-
-	if trace.BackupUsed && !trace.BackupSucceeded {
-		return fmt.Sprintf("🤖️ 由 %s 生成 %s失敗（備用 %s 失敗）", primaryModel, summaryName, backupModel)
+	if len(usedModels) > 0 {
+		return strings.Join(usedModels, "、")
 	}
 
 	if trace.PrimaryFailed {
-		return fmt.Sprintf("🤖️ 由 %s 生成 %s失敗", primaryModel, summaryName)
+		return "資訊不可用"
 	}
 
-	return fmt.Sprintf("🤖️ 由 %s 生成 %s", primaryModel, summaryName)
+	return pickModelName(trace.PrimaryUsedModel, trace.PrimaryModel)
 }
 
-func formatCheckStatusLine(checkTrace *openai.CheckModelExecutionTrace, _ *openai.GenerationModelExecutionTrace) string {
-	if checkTrace == nil || checkTrace.Model == "" {
-		return "🤖️ 未配置校驗模型"
-	}
-
-	backupModel := pickModelName(checkTrace.BackupUsedModel, checkTrace.BackupModel)
-
-	if checkTrace.Attempted && checkTrace.Succeeded && checkTrace.BackupUsed {
-		return fmt.Sprintf("🤖️ 由 %s 校驗格式失敗（備用 %s 成功）", checkTrace.Model, backupModel)
-	}
-
-	if checkTrace.Attempted && checkTrace.Failed {
-		if checkTrace.BackupUsed {
-			return fmt.Sprintf("🤖️ 由 %s 校驗格式失敗（備用 %s 失敗）", checkTrace.Model, backupModel)
-		}
-		return fmt.Sprintf("🤖️ 由 %s 校驗格式失敗", checkTrace.Model)
-	}
-
-	if checkTrace.Attempted && checkTrace.Succeeded {
-		return fmt.Sprintf("🤖️ 由 %s 校驗格式", checkTrace.Model)
-	}
-
-	return fmt.Sprintf("🤖️ 由 %s 校驗格式未觸發", checkTrace.Model)
-}
-
-func BuildModelExecutionStatusLines(condensedTrace *openai.CondensedExecutionTrace, recapTrace *openai.RecapExecutionTrace) []string {
-	lines := make([]string, 0, 3)
-
+// BuildRichRecapModelInfo renders model provenance as a quiet Rich Markdown
+// quote. The conditional Check repair remains visible without implying that it
+// ran for every recap.
+func BuildRichRecapModelInfo(condensedTrace *openai.CondensedExecutionTrace, recapTrace *openai.RecapExecutionTrace) string {
+	condensedModel := "資訊不可用"
 	if condensedTrace != nil {
-		lines = append(lines, formatGenerationStatusLine(&condensedTrace.Generation, "濃縮總結"))
-	} else {
-		lines = append(lines, "🤖️ 濃縮總結模型資訊不可用")
+		generation := condensedTrace.Generation
+		if condensedTrace.Check.Succeeded && generation.BackupUsed && strings.TrimSpace(generation.BackupUsedModel) != "" {
+			generation.BackupSucceeded = true
+		}
+		condensedModel = generationModelName(&generation)
 	}
 
+	detailModel := "資訊不可用"
 	if recapTrace != nil {
-		lines = append(lines, formatGenerationStatusLine(&recapTrace.Generation, "分段總結"))
-		lines = append(lines, formatCheckStatusLine(&recapTrace.Check, &recapTrace.Generation))
-	} else {
-		lines = append(lines, "🤖️ 分段總結模型資訊不可用")
-		lines = append(lines, "🤖️ 校驗模型資訊不可用")
+		detailModel = generationModelName(&recapTrace.Generation)
 	}
 
-	return lines
+	checkModel := "資訊不可用"
+	if condensedTrace != nil {
+		checkModel = strings.TrimSpace(condensedTrace.Check.Generation.PrimaryModel)
+		if checkModel == "" {
+			checkModel = "未設定"
+		} else if condensedTrace.Check.Attempted {
+			checkModel = generationModelName(&condensedTrace.Check.Generation)
+		}
+	}
+
+	return strings.Join([]string{
+		"> **模型資訊**",
+		">",
+		"> - 濃縮總結：" + EscapeRichMarkdownText(condensedModel),
+		"> - 詳細總結：" + EscapeRichMarkdownText(detailModel),
+		"> - Check：" + EscapeRichMarkdownText(checkModel),
+	}, "\n")
 }

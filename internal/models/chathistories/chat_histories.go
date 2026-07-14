@@ -376,84 +376,60 @@ func formatFullNameAndUsername(fullName, username string) string {
 	return strings.ReplaceAll(fullName, "#", "")
 }
 
-func (m *Model) encodeMessageIDIntoVirtualMessageID(histories []*ent.ChatHistories) map[int64]int64 {
-	virtualMessageID := int64(1)
-	mMessageIDToVirtualMessageID := make(map[int64]int64)
+func buildRichRecapPrompt(histories []*ent.ChatHistories) (string, map[int64]int64) {
+	lines := make([]string, 0, len(histories))
+	virtualToReal := make(map[int64]int64, len(histories))
+	nextVirtualID := int64(1)
 
 	for _, message := range histories {
-		mMessageIDToVirtualMessageID[virtualMessageID] = message.MessageID
-		message.MessageID = virtualMessageID
-		virtualMessageID++
+		messageVirtualID := nextVirtualID
+		virtualToReal[messageVirtualID] = message.MessageID
+		nextVirtualID++
 
-		if message.RepliedToMessageID != 0 {
-			mMessageIDToVirtualMessageID[virtualMessageID] = message.RepliedToMessageID
-			message.RepliedToMessageID = virtualMessageID
-			virtualMessageID++
-		}
-	}
-
-	return mMessageIDToVirtualMessageID
-}
-
-func (m *Model) decodeMessageIDFromVirtualMessageID(mMessageIDToVirtualMessageID map[int64]int64, outputs []*openai.ChatHistorySummarizationOutputs) {
-	for _, o := range outputs {
-		for _, d := range o.Discussion {
-			d.KeyIDs = lo.Map(d.KeyIDs, func(virtualMessageID int64, i int) int64 {
-				return mMessageIDToVirtualMessageID[virtualMessageID]
-			})
+		if message.RepliedToMessageID == 0 {
+			lines = append(lines, fmt.Sprintf(
+				"msgId:%d: %s sent: %s",
+				messageVirtualID,
+				formatFullNameAndUsername(message.FullName, message.Username),
+				message.Text,
+			))
+			continue
 		}
 
-		o.SinceID = mMessageIDToVirtualMessageID[o.SinceID]
+		repliedToVirtualID := nextVirtualID
+		virtualToReal[repliedToVirtualID] = message.RepliedToMessageID
+		nextVirtualID++
+		repliedToContext := fmt.Sprintf(
+			"%s sent msgId:%d",
+			formatFullNameAndUsername(message.RepliedToFullName, message.RepliedToUsername),
+			repliedToVirtualID,
+		)
+		lines = append(lines, fmt.Sprintf(
+			"msgId:%d: %s replying to [%s]: %s",
+			messageVirtualID,
+			formatFullNameAndUsername(message.FullName, message.Username),
+			repliedToContext,
+			message.Text,
+		))
 	}
+
+	return strings.Join(lines, "\n"), virtualToReal
 }
 
 func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType, histories []*ent.ChatHistories) (uuid.UUID, []string, *openai.RecapExecutionTrace, error) {
-	historiesLLMFriendly := make([]string, 0, len(histories))
-	historiesIncludedMessageIDs := make([]int64, 0)
+	chatHistories, virtualToReal := buildRichRecapPrompt(histories)
+	summarizations, statusUsage, recapTrace, err := m.summarizeChatHistories(chatID, chatHistories)
+	if err != nil {
+		return uuid.Nil, []string{}, recapTrace, err
+	}
 
-	mMessageIDToVirtualMessageID := m.encodeMessageIDIntoVirtualMessageID(histories)
-
-	for _, message := range histories {
-		if message.RepliedToMessageID == 0 {
-			historiesLLMFriendly = append(historiesLLMFriendly, fmt.Sprintf(
-				"msgId:%d: %s sent: %s",
-				message.MessageID,
-				formatFullNameAndUsername(message.FullName, message.Username),
-				message.Text,
-			))
-
-			historiesIncludedMessageIDs = append(historiesIncludedMessageIDs, message.MessageID)
-		} else {
-			repliedToPartialContextMessage := fmt.Sprintf(
-				"%s sent msgId:%d",
-				formatFullNameAndUsername(message.RepliedToFullName, message.RepliedToUsername),
-				message.RepliedToMessageID,
-			)
-			historiesLLMFriendly = append(historiesLLMFriendly, fmt.Sprintf(
-				"msgId:%d: %s replying to [%s]: %s",
-				message.MessageID,
-				formatFullNameAndUsername(message.FullName, message.Username),
-				repliedToPartialContextMessage,
-				message.Text,
-			))
-
-			historiesIncludedMessageIDs = append(historiesIncludedMessageIDs, message.MessageID)
+	resolvedSummaries := make([]string, 0, len(summarizations))
+	for _, summarization := range summarizations {
+		sanitized := SanitizeDetailedRecapMarkdown(summarization)
+		resolved := strings.TrimSpace(ResolveRichRecapReferences(sanitized, chatID, chatType, virtualToReal))
+		if resolved != "" {
+			resolvedSummaries = append(resolvedSummaries, resolved)
 		}
-	}
-
-	chatHistories := strings.Join(historiesLLMFriendly, "\n")
-
-	summarizations, statusUsage, recapTrace, err := m.summarizeChatHistories(chatID, historiesIncludedMessageIDs, chatHistories)
-	if err != nil {
-		return uuid.Nil, make([]string, 0), recapTrace, err
-	}
-
-	// reverse virtual message id to real message id
-	m.decodeMessageIDFromVirtualMessageID(mMessageIDToVirtualMessageID, summarizations)
-
-	ss, err := m.renderRecapTemplates(chatID, chatType, summarizations)
-	if err != nil {
-		return uuid.Nil, make([]string, 0), recapTrace, err
 	}
 
 	modelName := m.openAI.GetModelName()
@@ -473,7 +449,7 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 		Create().
 		SetChatID(chatID).
 		SetRecapInputs(chatHistories).
-		SetRecapOutputs(strings.Join(ss, "\n")).
+		SetRecapOutputs(strings.Join(resolvedSummaries, "\n\n")).
 		SetCompletionTokenUsage(statusUsage.CompletionTokens).
 		SetPromptTokenUsage(statusUsage.PromptTokens).
 		SetTotalTokenUsage(statusUsage.TotalTokens).
@@ -485,7 +461,7 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 		return uuid.Nil, make([]string, 0), recapTrace, err
 	}
 
-	return saved.ID, ss, recapTrace, nil
+	return saved.ID, resolvedSummaries, recapTrace, nil
 }
 
 func (m *Model) GetOpenAIModelName() string {

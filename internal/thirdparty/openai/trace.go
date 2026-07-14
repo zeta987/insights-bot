@@ -15,26 +15,20 @@ type GenerationModelExecutionTrace struct {
 	BackupFailureReason string `json:"backupFailureReason"`
 }
 
-type CheckModelExecutionTrace struct {
-	Model               string `json:"model"`
-	BackupModel         string `json:"backupModel"`
-	BackupUsed          bool   `json:"backupUsed"`
-	BackupUsedModel     string `json:"backupUsedModel"`
-	BackupSucceeded     bool   `json:"backupSucceeded"`
-	BackupFailureReason string `json:"backupFailureReason"`
-	Attempted           bool   `json:"attempted"`
-	Succeeded           bool   `json:"succeeded"`
-	Failed              bool   `json:"failed"`
-	FailureReason       string `json:"failureReason"`
-}
-
 type RecapExecutionTrace struct {
 	Generation GenerationModelExecutionTrace `json:"generation"`
-	Check      CheckModelExecutionTrace      `json:"check"`
+}
+
+type ConditionalModelExecutionTrace struct {
+	Generation    GenerationModelExecutionTrace `json:"generation"`
+	Attempted     bool                          `json:"attempted"`
+	Succeeded     bool                          `json:"succeeded"`
+	FailureReason string                        `json:"failureReason"`
 }
 
 type CondensedExecutionTrace struct {
-	Generation GenerationModelExecutionTrace `json:"generation"`
+	Generation GenerationModelExecutionTrace  `json:"generation"`
+	Check      ConditionalModelExecutionTrace `json:"check"`
 }
 
 type recapExecutionTraceContextKey struct{}

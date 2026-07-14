@@ -27,7 +27,6 @@ services:
       - CHECK_MODEL
       - CHECK_MODEL_backup
       - OPENAI_FORCE_CHECK_MODEL_FAILURE
-      - OPENAI_FORCE_INVALID_RECAP_JSON_FOR_TEST
       - OPENAI_FORCE_CONDENSED_PRIMARY_FAILURE_FOR_TEST
       - OPENAI_VERBOSE_PAYLOAD_LOGS
       - SARCASTIC_CONDENSED_MODEL_NAME
@@ -95,7 +94,6 @@ services:
       - CHECK_MODEL
       - CHECK_MODEL_backup
       - OPENAI_FORCE_CHECK_MODEL_FAILURE
-      - OPENAI_FORCE_INVALID_RECAP_JSON_FOR_TEST
       - OPENAI_FORCE_CONDENSED_PRIMARY_FAILURE_FOR_TEST
       - OPENAI_VERBOSE_PAYLOAD_LOGS
       - SARCASTIC_CONDENSED_MODEL_NAME
@@ -103,6 +101,8 @@ services:
       - SARCASTIC_CONDENSED_SYSTEM_PROMPT
       - SARCASTIC_CONDENSED_USER_PROMPT
       - CHAT_HISTORIES_SUMMARIZATION_LANGUAGE
+      - AUTO_RECAP_TEST_ENABLED
+      - AUTO_RECAP_TEST_CHAT_ID
       - DB_CONNECTION_STR
       - REDIS_HOST=redis_local
       - REDIS_PORT=6379
@@ -142,7 +142,7 @@ services:
   # and change the DB_CONNECTION_STR environment variable in insights_bot or
   # insights_bot_local service
   db_local:
-    image: postgres:alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       - POSTGRES_PASSWORD=123456
