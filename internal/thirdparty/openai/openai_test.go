@@ -24,19 +24,31 @@ import (
 
 var client *OpenAIClient
 
-func TestDefaultCondensedPromptsRequestStructuredRichMarkdown(t *testing.T) {
-	require.Contains(t, SarcasticCondensedSystemPrompt, "###")
-	require.Contains(t, SarcasticCondensedSystemPrompt, "无序列表")
-	require.Contains(t, SarcasticCondensedSystemPrompt, "表格")
-	require.Contains(t, CheckCondensedOutputSystemPrompt, "###")
-	require.NotContains(t, CheckCondensedOutputSystemPrompt, "one natural sentence")
+func TestDefaultCondensedPromptsRequestOneLinerRoast(t *testing.T) {
+	require.Contains(t, SarcasticCondensedSystemPrompt, "一句话")
+	require.Contains(t, SarcasticCondensedSystemPrompt, "歇后语")
+	require.Contains(t, SarcasticCondensedSystemPrompt, "不允许分行")
+	require.Contains(t, CheckCondensedOutputSystemPrompt, "ONE line")
 }
 
-func TestNormalizeStructuredCondensedOutputAcceptsAsteriskList(t *testing.T) {
-	normalized, err := normalizeStructuredCondensedOutputContent("### 主題\n\n* **重點**：內容")
+func TestNormalizeStructuredCondensedOutputAcceptsSingleRoastLine(t *testing.T) {
+	roast := "**群友**在*深夜*把部署聊成了玄學——`CHECK_MODEL` 都看不下去了。"
+
+	normalized, err := normalizeStructuredCondensedOutputContent(roast)
 
 	require.NoError(t, err)
-	require.Contains(t, normalized, "* **重點**：內容")
+	require.Equal(t, roast, normalized)
+}
+
+func TestNormalizeStructuredCondensedOutputRejectsHeadingsListsAndMultiline(t *testing.T) {
+	_, err := normalizeStructuredCondensedOutputContent("### 主題\n\n* **重點**：內容")
+	require.Error(t, err)
+
+	_, err = normalizeStructuredCondensedOutputContent("- 只有一個清單項")
+	require.Error(t, err)
+
+	_, err = normalizeStructuredCondensedOutputContent("第一句。\n第二句。")
+	require.Error(t, err)
 }
 
 func TestMain(m *testing.M) {
@@ -293,7 +305,7 @@ func TestSarcasticCondenseRecordsConfiguredCheckModelWithoutCallingIt(t *testing
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		requestedModels = append(requestedModels, payload.Model)
 		writer.Header().Set("Content-Type", "application/json")
-		content := "### 正常濃縮摘要\n\n- **重點**：維持 Rich Markdown 結構"
+		content := "**正常濃縮摘要**——一句話銳評把 Rich Markdown 玩明白了。"
 		_, err := writer.Write([]byte(fmt.Sprintf(
 			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
 			"resolved-condensed-model",
@@ -319,7 +331,7 @@ func TestSarcasticCondenseRecordsConfiguredCheckModelWithoutCallingIt(t *testing
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "### 正常濃縮摘要")
+	require.Contains(t, result, "正常濃縮摘要")
 	require.Equal(t, []string{"condensedModel"}, requestedModels)
 	require.Equal(t, "resolved-condensed-model", trace.Generation.PrimaryUsedModel)
 	require.Equal(t, "checkModel", trace.Check.Generation.PrimaryModel)
@@ -337,7 +349,7 @@ func TestSarcasticCondenseRecordsSuccessfulCheckRepair(t *testing.T) {
 		requestedModels = append(requestedModels, payload.Model)
 		content := `{"summary":"invalid"}`
 		if payload.Model == "checkModel" {
-			content = "### 修復後摘要\n\n- **重點**：Check 已產生 Rich Markdown"
+			content = "**修復後摘要**——Check 出手把爛攤子縫成一句話。"
 		}
 		writer.Header().Set("Content-Type", "application/json")
 		responseModel := payload.Model
@@ -368,7 +380,7 @@ func TestSarcasticCondenseRecordsSuccessfulCheckRepair(t *testing.T) {
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "### 修復後摘要")
+	require.Contains(t, result, "修復後摘要")
 	require.Equal(t, []string{"condensedModel", "checkModel"}, requestedModels)
 	require.True(t, trace.Generation.PrimaryFailed)
 	require.True(t, trace.Check.Attempted)
@@ -386,10 +398,10 @@ func TestSarcasticCondenseRecordsResolvedBackupModel(t *testing.T) {
 		requestedModels = append(requestedModels, payload.Model)
 
 		responseModel := "resolved-condensed-primary"
-		content := "### 主摘要\n\n- **重點**：主模型內容"
+		content := "**主摘要**——主模型一句話全包。"
 		if payload.Model == "condensedBackup" {
 			responseModel = "resolved-condensed-backup"
-			content = "### 備援摘要\n\n- **重點**：備援模型內容"
+			content = "**備援摘要**——備援模型接鍋成功，一句話收工。"
 		}
 		writer.Header().Set("Content-Type", "application/json")
 		_, err := writer.Write([]byte(fmt.Sprintf(
@@ -416,7 +428,7 @@ func TestSarcasticCondenseRecordsResolvedBackupModel(t *testing.T) {
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "### 備援摘要")
+	require.Contains(t, result, "備援摘要")
 	require.Equal(t, []string{"condensedPrimary", "condensedBackup"}, requestedModels)
 	require.True(t, trace.Generation.BackupUsed)
 	require.True(t, trace.Generation.BackupSucceeded)
@@ -427,7 +439,7 @@ func TestSarcasticCondenseRecordsResolvedBackupModel(t *testing.T) {
 func TestSarcasticCondenseDoesNotRecordStructurallyInvalidPrimaryAsUsed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
-		_, err := writer.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":"resolved-invalid-primary","choices":[{"index":0,"message":{"role":"assistant","content":"缺少 Rich Markdown 結構"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`))
+		_, err := writer.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":"resolved-invalid-primary","choices":[{"index":0,"message":{"role":"assistant","content":"### 主題\n- 這仍是舊的清單結構"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`))
 		require.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
@@ -460,14 +472,14 @@ func TestSarcasticCondenseCheckRepairsResolvedBackupSourceOnly(t *testing.T) {
 		requestedModels = append(requestedModels, payload.Model)
 
 		responseModel := "resolved-condensed-primary"
-		content := "主模型缺少 Rich Markdown 結構"
+		content := "- 主模型只回了一個清單項"
 		switch payload.Model {
 		case "condensedBackup":
 			responseModel = "resolved-condensed-backup"
-			content = "備援模型仍缺少 Rich Markdown 結構"
+			content = "- 備援模型也只回了一個清單項"
 		case "checkModel":
 			responseModel = "resolved-check-model"
-			content = "### 修復後摘要\n\n- **重點**：Check 修復備援內容"
+			content = "**修復後摘要**——Check 把備援內容縫成一句話。"
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
@@ -495,7 +507,7 @@ func TestSarcasticCondenseCheckRepairsResolvedBackupSourceOnly(t *testing.T) {
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "### 修復後摘要")
+	require.Contains(t, result, "修復後摘要")
 	require.Equal(t, []string{"condensedPrimary", "condensedBackup", "checkModel"}, requestedModels)
 	require.Empty(t, trace.Generation.PrimaryUsedModel)
 	require.True(t, trace.Generation.BackupUsed)
@@ -523,10 +535,10 @@ func TestSarcasticCondenseCheckRepairsPrimaryAfterBackupTransportFailure(t *test
 		}
 
 		responseModel := "resolved-condensed-primary"
-		content := "主模型缺少 Rich Markdown 結構"
+		content := "- 主模型只回了一個清單項"
 		if payload.Model == "checkModel" {
 			responseModel = "resolved-check-model"
-			content = "### 修復後摘要\n\n- **重點**：Check 修復主模型內容"
+			content = "**修復後摘要**——Check 把主模型內容縫成一句話。"
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
@@ -554,7 +566,7 @@ func TestSarcasticCondenseCheckRepairsPrimaryAfterBackupTransportFailure(t *test
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "### 修復後摘要")
+	require.Contains(t, result, "修復後摘要")
 	require.Equal(t, []string{"condensedPrimary", "condensedBackup", "checkModel"}, requestedModels)
 	require.Equal(t, "resolved-condensed-primary", trace.Generation.PrimaryUsedModel)
 	require.True(t, trace.Generation.BackupUsed)
@@ -574,10 +586,10 @@ func TestSarcasticCondenseUsesCheckBackupWhenPrimaryCheckOutputIsInvalid(t *test
 
 		content := "{\"summary\":\"invalid\"}"
 		if model == "checkPrimary" {
-			content = "普通長段落仍不符合 Rich Markdown 結構"
+			content = "### 修復標題\n\n- 主 Check 仍回舊的清單結構"
 		}
 		if model == "checkBackup" {
-			content = "### 修復後摘要\n\n- **重點**：備援 Check 已產生 Rich Markdown"
+			content = "**修復後摘要**——備援 Check 出手就是一句話。"
 		}
 		responseModel := model
 		if model == "checkBackup" {
@@ -609,12 +621,12 @@ func TestSarcasticCondenseUsesCheckBackupWhenPrimaryCheckOutputIsInvalid(t *test
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "### 修復後摘要")
+	require.Contains(t, result, "修復後摘要")
 	require.Equal(t, []string{"condensedModel", "checkPrimary", "checkBackup"}, requestedModels)
 	require.True(t, trace.Check.Attempted)
 	require.True(t, trace.Check.Succeeded)
 	require.True(t, trace.Check.Generation.PrimaryFailed)
-	require.Contains(t, trace.Check.Generation.PrimaryFailureReason, "level-three heading")
+	require.Contains(t, trace.Check.Generation.PrimaryFailureReason, "not a single line")
 	require.True(t, trace.Check.Generation.BackupUsed)
 	require.True(t, trace.Check.Generation.BackupSucceeded)
 	require.Equal(t, "resolved-check-backup", trace.Check.Generation.BackupUsedModel)
@@ -630,7 +642,7 @@ func TestSarcasticCondenseForcedCheckFailureSwitchesToCheckBackup(t *testing.T) 
 
 		content := "{\"summary\":\"invalid\"}"
 		if model == "checkBackup" {
-			content = "### 強制切換後摘要\n\n- **重點**：備援 Check 已接手"
+			content = "**強制切換後摘要**——備援 Check 順利接管全場。"
 		}
 		responseModel := model
 		if model == "checkBackup" {
@@ -663,7 +675,7 @@ func TestSarcasticCondenseForcedCheckFailureSwitchesToCheckBackup(t *testing.T) 
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "### 強制切換後摘要")
+	require.Contains(t, result, "強制切換後摘要")
 	require.Equal(t, []string{"condensedModel", "checkBackup"}, requestedModels)
 	require.True(t, trace.Check.Succeeded)
 	require.True(t, trace.Check.Generation.PrimaryFailed)

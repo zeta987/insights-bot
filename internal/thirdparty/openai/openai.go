@@ -308,26 +308,35 @@ func isCondensedUnorderedListItem(line string) bool {
 	return strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ")
 }
 
+// normalizeStructuredCondensedOutputContent validates the roast-style
+// condensed summary: exactly one sentence-like line with no headings or
+// unordered-list markers. Inline bold/italic/code and punctuation are allowed.
 func normalizeStructuredCondensedOutputContent(content string) (string, error) {
 	normalized, err := normalizeCondensedOutputContent(content)
 	if err != nil {
 		return "", err
 	}
 
-	hasLevelThreeHeading := false
-	hasListItem := false
+	lines := make([]string, 0, 1)
 	for _, line := range strings.Split(normalized, "\n") {
 		trimmed := strings.TrimSpace(line)
-		hasLevelThreeHeading = hasLevelThreeHeading || strings.HasPrefix(trimmed, "### ")
-		hasListItem = hasListItem || isCondensedUnorderedListItem(trimmed)
+		if trimmed == "" {
+			continue
+		}
+
+		lines = append(lines, trimmed)
 	}
-	if !hasLevelThreeHeading {
-		return "", errors.New("condensed output is missing a level-three heading")
+	if len(lines) != 1 {
+		return "", errors.New("condensed output is not a single line")
 	}
-	if !hasListItem {
-		return "", errors.New("condensed output is missing an unordered-list item")
+	if strings.HasPrefix(lines[0], "#") {
+		return "", errors.New("condensed output contains a heading")
 	}
-	return normalized, nil
+	if isCondensedUnorderedListItem(lines[0]) {
+		return "", errors.New("condensed output contains an unordered-list item")
+	}
+
+	return lines[0], nil
 }
 
 func (c *OpenAIClient) callChatCompletionWithModel(

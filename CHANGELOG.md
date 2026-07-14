@@ -10,6 +10,7 @@
 - 純文字備援改為受控觸發：僅在 Telegram 回傳與排版格式相關的 HTTP 400 錯誤時才改用純文字重送，其餘錯誤照常回報。
 - 完整移除 Telegraph 整合（`internal/services/telegraph`、`internal/thirdparty/telegraph`）。
 - 新增吐槽（sarcastic）風格的濃縮總結，可透過 `SARCASTIC_CONDENSED_MODEL_NAME` 指定專用模型，並支援以逗號分隔的備援模型鏈（`SARCASTIC_CONDENSED_MODEL_NAME_backup`、`OPENAI_API_MODEL_NAME_backup`）。
+- 濃縮總結改為「一句話銳評」風格：以歇後語式的韻律把全部話題大雜燴串成一句小故事，可帶粗體與斜體，取代原本多行清單式的濃縮版面。
 - 新增 `CHECK_MODEL` 條件式修復模型（含 `CHECK_MODEL_backup` 備援鏈），只在濃縮總結的 Rich Markdown 驗證失敗時才會啟動，正常情況不會多花任何模型呼叫。
 - 新增 `CHAT_HISTORIES_SUMMARIZATION_LANGUAGE` 設定，可指定摘要的輸出語言。
 - 強化 Rich Message 傳送路徑的穩定性：訊息長度改以 UTF-16 code unit 計算並加入「message is too long」錯誤的備援處理；濃縮總結的備援截斷邏輯集中管理，確保不會截斷連結或標記符號；回顧中的 `@username` 會經過中和處理，避免誤觸提及通知；Markdown 分割與跳脫輔助函式改為跨套件共用；傳送失敗時會清理回顧的佔位訊息。
@@ -25,6 +26,7 @@
 - Plain-text fallback is now tightly controlled: it triggers only on Telegram formatting-specific HTTP 400 errors, while all other errors surface as usual.
 - The entire Telegraph integration has been removed (`internal/services/telegraph`, `internal/thirdparty/telegraph`).
 - Sarcastic condensed summaries can run on a dedicated model via `SARCASTIC_CONDENSED_MODEL_NAME`, with comma-separated backup model chains (`SARCASTIC_CONDENSED_MODEL_NAME_backup`, `OPENAI_API_MODEL_NAME_backup`).
+- The condensed summary is now a single-sentence roast: one rhythmic, meme-flavored line that strings every topic into a little story (inline bold/italic allowed), replacing the previous multi-line list layout.
 - A new `CHECK_MODEL` conditional repair model (with a `CHECK_MODEL_backup` chain) runs only when the condensed Rich Markdown fails validation, so no extra model calls happen on the happy path.
 - The new `CHAT_HISTORIES_SUMMARIZATION_LANGUAGE` setting controls the output language of generated summaries.
 - The rich message delivery path has been hardened: message lengths are counted in UTF-16 code units with a dedicated fallback for "message is too long" errors; condensed-summary fallback truncation is centralized and safe around links and markers; `@username` mentions inside recaps are neutralized so they no longer ping users; markdown split/escape helpers are now shared between packages; and recap placeholder messages are cleaned up when sending fails.
