@@ -775,18 +775,24 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 			zap.Int64("chat_id", c.Update.CallbackQuery.Message.Chat.ID),
 			zap.Int("sent_message_count", len(sentMessages)),
 		)
-		return nil, tgbot.NewExceptionError(sendErr).WithMessage("聊天記錄回顧發送失敗，請稍後再試！").WithReply(replyToMessage)
+	} else {
+		h.logger.Info("sent rich chat recap",
+			zap.Int64("chat_id", c.Update.CallbackQuery.Message.Chat.ID),
+			zap.Int("message_count", len(sentMessages)),
+		)
 	}
-	h.logger.Info("sent rich chat recap",
-		zap.Int64("chat_id", c.Update.CallbackQuery.Message.Chat.ID),
-		zap.Int("message_count", len(sentMessages)),
-	)
 
-	// Delete the "Generating..." message
+	// Delete the "Generating..." message even when sending failed: its inline
+	// keyboard was already cleared, so leaving it behind would strand an
+	// unusable placeholder in the chat.
 	deleteConfig := tgbotapi.NewDeleteMessage(c.Update.CallbackQuery.Message.Chat.ID, messageID)
 	_, delErr := c.Bot.Request(deleteConfig)
 	if delErr != nil {
 		h.logger.Error("failed to delete waiting message", zap.Error(delErr))
+	}
+
+	if sendErr != nil {
+		return nil, tgbot.NewExceptionError(sendErr).WithMessage("聊天記錄回顧發送失敗，請稍後再試！").WithReply(replyToMessage)
 	}
 
 	return nil, nil // Indicate success

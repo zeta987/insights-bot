@@ -68,12 +68,12 @@ func (h *CommandHandler) handleRecapForwardedCommand(c *tgbot.Context) (tgbot.Re
 		return nil, tgbot.NewMessageError("该命令当前只能在私聊中使用哦！")
 	}
 
-	_, err := c.Bot.Send(tgbotapi.NewMessage(
+	waitingMessage, err := c.Bot.Send(tgbotapi.NewMessage(
 		c.Update.Message.From.ID,
 		"正在为已经接收到的聊天记录生成回顾，请稍等...",
 	))
 	if err != nil {
-		h.logger.Error("failed to send message")
+		h.logger.Error("failed to send waiting message", zap.Error(err))
 	}
 
 	histories, err := h.chathistories.FindPrivateForwardedChatHistories(c.Update.Message.From.ID)
@@ -126,24 +126,37 @@ func (h *CommandHandler) handleRecapForwardedCommand(c *tgbot.Context) (tgbot.Re
 	})
 	parts := chathistories.ComposeRichRecapMessages(visibleSummary, summarizations)
 
-	sentMessages, err := recapdelivery.SendRichRecapParts(c.Bot, recapdelivery.Config{
+	sentMessages, sendErr := recapdelivery.SendRichRecapParts(c.Bot, recapdelivery.Config{
 		ChatID:                   c.Update.Message.Chat.ID,
 		Parts:                    parts,
 		ReplyToMessageID:         c.Update.Message.MessageID,
 		AllowSendingWithoutReply: true,
 	})
-	if err != nil {
+	if sendErr != nil {
 		h.logger.Error("failed to send forwarded histories rich recap",
-			zap.Error(err),
+			zap.Error(sendErr),
 			zap.Int64("chat_id", c.Update.Message.Chat.ID),
 			zap.Int("sent_message_count", len(sentMessages)),
 		)
-		return nil, tgbot.NewExceptionError(err).WithMessage("聊天记录回顾发送失败，请稍后再试！").WithReply(c.Update.Message)
+	} else {
+		h.logger.Info("sent forwarded histories rich recap",
+			zap.Int64("chat_id", c.Update.Message.Chat.ID),
+			zap.Int("message_count", len(sentMessages)),
+		)
 	}
-	h.logger.Info("sent forwarded histories rich recap",
-		zap.Int64("chat_id", c.Update.Message.Chat.ID),
-		zap.Int("message_count", len(sentMessages)),
-	)
+
+	// Delete the waiting placeholder even when sending failed so it does not
+	// linger in the private chat.
+	if waitingMessage.MessageID != 0 {
+		deleteConfig := tgbotapi.NewDeleteMessage(c.Update.Message.From.ID, waitingMessage.MessageID)
+		if _, delErr := c.Bot.Request(deleteConfig); delErr != nil {
+			h.logger.Error("failed to delete waiting message", zap.Error(delErr))
+		}
+	}
+
+	if sendErr != nil {
+		return nil, tgbot.NewExceptionError(sendErr).WithMessage("聊天记录回顾发送失败，请稍后再试！").WithReply(c.Update.Message)
+	}
 
 	completion := tgbotapi.NewMessage(c.Update.Message.Chat.ID, "总结完成，如果你觉得不满意，可以再次发送 /recap_forwarded 重新生成哦！如果觉得满意，并且希望进行其他的总结操作，可以在开始前发送 /cancel 来清空当前已经接收到的消息，如果不进行操作，缓存的消息将会在 2 小时后被自动清理。")
 	completion.ReplyToMessageID = c.Update.Message.MessageID
