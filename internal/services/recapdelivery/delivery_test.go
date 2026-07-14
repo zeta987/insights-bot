@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +18,7 @@ type fakeSender struct {
 	richConfigs []tgbot.RichMessageConfig
 	richErrors  []error
 	plain       []tgbotapi.MessageConfig
+	plainErrors []error
 	nextID      int
 }
 
@@ -39,6 +39,11 @@ func (f *fakeSender) Send(chattable tgbotapi.Chattable) (tgbotapi.Message, error
 	}
 
 	f.plain = append(f.plain, config)
+	index := len(f.plain) - 1
+	if index < len(f.plainErrors) && f.plainErrors[index] != nil {
+		return tgbotapi.Message{}, f.plainErrors[index]
+	}
+
 	return f.nextMessage(config.ChatID), nil
 }
 
@@ -169,6 +174,14 @@ func TestSendRichRecapPartsDoesNotFallbackForOtherTelegramErrors(t *testing.T) {
 			err:  &tgbotapi.Error{Code: 400, Message: "Bad Request: invalid reply parameters for rich message"},
 		},
 		{
+			name: "malformed reply markup payload",
+			err:  &tgbotapi.Error{Code: 400, Message: "Bad Request: failed to parse reply_markup JSON"},
+		},
+		{
+			name: "bare parse error without formatting context",
+			err:  &tgbotapi.Error{Code: 400, Message: "Bad Request: parse error"},
+		},
+		{
 			name: "network error",
 			err:  errors.New("request timed out"),
 		},
@@ -207,6 +220,85 @@ func TestSendRichRecapPartsUsesPlainTextForRemainingPartsAfterFallback(t *testin
 	assert.Equal(t, messages[0].MessageID, sender.plain[1].ReplyToMessageID)
 }
 
+func TestSendRichRecapPartsFallsBackToPlainTextWhenRichMessageIsTooLong(t *testing.T) {
+	sender := &fakeSender{
+		richErrors: []error{&tgbotapi.Error{
+			Code:    400,
+			Message: "Bad Request: message is too long",
+		}},
+	}
+
+	messages, err := SendRichRecapParts(sender, Config{ChatID: 123, Parts: []string{"**recap 🧾**"}})
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Len(t, sender.richConfigs, 1)
+	require.Len(t, sender.plain, 1)
+	assert.Equal(t, "recap 🧾", sender.plain[0].Text)
+}
+
+func TestSendRichRecapPartsResplitsPlainFallbackWhenTelegramReportsTooLong(t *testing.T) {
+	sender := &fakeSender{
+		richErrors: []error{&tgbotapi.Error{
+			Code:    400,
+			Message: "Bad Request: can't parse entities: malformed markdown",
+		}},
+		plainErrors: []error{&tgbotapi.Error{
+			Code:    400,
+			Message: "Bad Request: message is too long",
+		}},
+	}
+	text := strings.Repeat("a", 3000) + " " + strings.Repeat("b", 500)
+
+	messages, err := SendRichRecapParts(sender, Config{ChatID: 123, Parts: []string{text}})
+	require.NoError(t, err)
+	require.Len(t, sender.plain, 3)
+	require.Len(t, messages, 2)
+	assert.Equal(t, text, sender.plain[0].Text)
+	for _, config := range sender.plain[1:] {
+		assert.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), PlainTextLimit/2)
+	}
+	assert.Equal(t, text, sender.plain[1].Text+sender.plain[2].Text)
+	assert.Equal(t, messages[0].MessageID, sender.plain[2].ReplyToMessageID)
+}
+
+func TestSendRichRecapPartsDoesNotResplitPlainFallbackForOtherErrors(t *testing.T) {
+	plainErr := &tgbotapi.Error{Code: 400, Message: "Bad Request: chat not found"}
+	sender := &fakeSender{
+		richErrors: []error{&tgbotapi.Error{
+			Code:    400,
+			Message: "Bad Request: can't parse entities: malformed markdown",
+		}},
+		plainErrors: []error{plainErr},
+	}
+
+	messages, err := SendRichRecapParts(sender, Config{ChatID: 123, Parts: []string{"recap"}})
+	require.ErrorIs(t, err, plainErr)
+	assert.Empty(t, messages)
+	require.Len(t, sender.plain, 1)
+}
+
+func TestSplitPlainTextMeasuresLimitInUTF16CodeUnits(t *testing.T) {
+	// 🧾 is one rune but two UTF-16 code units: rune counting keeps all of
+	// them in one chunk that Telegram rejects as too long.
+	text := strings.Repeat("🧾", PlainTextLimit/2+1)
+
+	parts := splitPlainText(text)
+
+	require.Len(t, parts, 2)
+	for _, part := range parts {
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(part), PlainTextLimit)
+	}
+	require.Equal(t, text, strings.Join(parts, ""))
+}
+
+func TestSplitPlainTextKeepsExactUTF16BoundaryInOnePart(t *testing.T) {
+	text := strings.Repeat("🧾", PlainTextLimit/2)
+
+	parts := splitPlainText(text)
+
+	require.Equal(t, []string{text}, parts)
+}
+
 func TestSendRichRecapPartsSplitsPlainTextFallbackAndRepliesToFirstMessage(t *testing.T) {
 	sender := &fakeSender{
 		richErrors: []error{&tgbotapi.Error{
@@ -221,7 +313,7 @@ func TestSendRichRecapPartsSplitsPlainTextFallbackAndRepliesToFirstMessage(t *te
 	require.Len(t, sender.plain, 2)
 	assert.Len(t, messages, 2)
 	for _, config := range sender.plain {
-		assert.LessOrEqual(t, utf8.RuneCountInString(config.Text), PlainTextLimit)
+		assert.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), PlainTextLimit)
 	}
 	assert.Zero(t, sender.plain[0].ReplyToMessageID)
 	assert.Equal(t, messages[0].MessageID, sender.plain[1].ReplyToMessageID)
@@ -273,7 +365,7 @@ func TestRichRecapSummaryFallsBackToCompleteSegmentedPlainText(t *testing.T) {
 	plainTexts := make([]string, 0, len(sender.plain))
 	for index, config := range sender.plain {
 		plainTexts = append(plainTexts, config.Text)
-		require.LessOrEqual(t, utf8.RuneCountInString(config.Text), PlainTextLimit)
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(config.Text), PlainTextLimit)
 		if index == 0 {
 			require.Equal(t, keyboard, config.ReplyMarkup)
 			require.Equal(t, 9, config.ReplyToMessageID)
@@ -302,7 +394,7 @@ func TestSplitPlainTextKeepsCitationLabelAndURLTogether(t *testing.T) {
 	assert.NotContains(t, parts[0], "https://")
 	assert.Equal(t, citation, parts[1])
 	for _, part := range parts {
-		assert.LessOrEqual(t, utf8.RuneCountInString(part), PlainTextLimit)
+		assert.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(part), PlainTextLimit)
 	}
 }
 

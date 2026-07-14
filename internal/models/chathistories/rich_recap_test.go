@@ -3,8 +3,8 @@ package chathistories
 import (
 	"strings"
 	"testing"
-	"unicode/utf8"
 
+	"github.com/nekomeowww/insights-bot/pkg/bots/tgbot"
 	"github.com/nekomeowww/insights-bot/pkg/types/telegram"
 	"github.com/stretchr/testify/require"
 )
@@ -135,7 +135,7 @@ func TestComposeRichRecapMessagesSplitsAtMarkdownBlockBoundaries(t *testing.T) {
 
 	require.Len(t, messages, 2)
 	for _, message := range messages {
-		require.LessOrEqual(t, utf8.RuneCountInString(message), RichMessageUTF8CharacterLimit)
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(message), RichMessageUTF16UnitLimit)
 		require.Equal(t, 1, strings.Count(message, "<details><summary>詳細總結</summary>"))
 		require.Equal(t, 1, strings.Count(message, "</details>"))
 	}
@@ -149,22 +149,52 @@ func TestComposeRichRecapMessagesSplitsAtMarkdownBlockBoundaries(t *testing.T) {
 func TestComposeRichRecapMessagesCountsUnicodeCharacters(t *testing.T) {
 	messages := ComposeRichRecapMessages(
 		"摘要",
-		[]string{strings.Repeat("界", RichMessageUTF8CharacterLimit)},
+		[]string{strings.Repeat("界", RichMessageUTF16UnitLimit)},
 	)
 
 	require.Len(t, messages, 2)
 	for _, message := range messages {
-		require.LessOrEqual(t, utf8.RuneCountInString(message), RichMessageUTF8CharacterLimit)
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(message), RichMessageUTF16UnitLimit)
 		require.Equal(t, 1, strings.Count(message, "<details><summary>詳細總結</summary>"))
 		require.Equal(t, 1, strings.Count(message, "</details>"))
 	}
 }
 
+func TestComposeRichRecapMessagesMeasuresLimitInUTF16CodeUnits(t *testing.T) {
+	// 🧾 is one rune but two UTF-16 code units: rune counting would keep this
+	// detail inside a single message that exceeds Telegram's real limit.
+	emojiCount := RichMessageUTF16UnitLimit / 2
+	messages := ComposeRichRecapMessages("", []string{strings.Repeat("🧾", emojiCount)})
+
+	require.GreaterOrEqual(t, len(messages), 2)
+	deliveredEmoji := 0
+	for _, message := range messages {
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(message), RichMessageUTF16UnitLimit)
+		deliveredEmoji += strings.Count(message, "🧾")
+	}
+	require.Equal(t, emojiCount, deliveredEmoji)
+}
+
+func TestComposeRichRecapMessagesKeepsExactUTF16BoundaryInOneMessage(t *testing.T) {
+	wrapperUnits := tgbot.MessageLengthInUTF16Units(richRecapDetailsOpen + richRecapDetailsClose)
+	boundaryEmojiCount := (RichMessageUTF16UnitLimit - wrapperUnits) / 2
+
+	messages := ComposeRichRecapMessages("", []string{strings.Repeat("🧾", boundaryEmojiCount)})
+	require.Len(t, messages, 1)
+	require.Equal(t, RichMessageUTF16UnitLimit, tgbot.MessageLengthInUTF16Units(messages[0]))
+
+	messages = ComposeRichRecapMessages("", []string{strings.Repeat("🧾", boundaryEmojiCount+1)})
+	require.Len(t, messages, 2)
+	for _, message := range messages {
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(message), RichMessageUTF16UnitLimit)
+	}
+}
+
 func TestComposeRichRecapMessagesDoesNotSplitCitationLinks(t *testing.T) {
 	citation := "[1](https://t.me/c/123/456)"
-	wrapperLength := utf8.RuneCountInString(richRecapDetailsOpen + richRecapDetailsClose)
-	condensedPrefixLength := utf8.RuneCountInString("摘要\n\n")
-	firstBodyLimit := RichMessageUTF8CharacterLimit - wrapperLength - condensedPrefixLength
+	wrapperLength := tgbot.MessageLengthInUTF16Units(richRecapDetailsOpen + richRecapDetailsClose)
+	condensedPrefixLength := tgbot.MessageLengthInUTF16Units("摘要\n\n")
+	firstBodyLimit := RichMessageUTF16UnitLimit - wrapperLength - condensedPrefixLength
 	detail := strings.Repeat("a", firstBodyLimit-10) + " " + citation + strings.Repeat("b", 20)
 
 	messages := ComposeRichRecapMessages("摘要", []string{detail})
@@ -173,7 +203,7 @@ func TestComposeRichRecapMessagesDoesNotSplitCitationLinks(t *testing.T) {
 	require.NotContains(t, messages[0], "https://")
 	require.Contains(t, messages[1], citation)
 	for _, message := range messages {
-		require.LessOrEqual(t, utf8.RuneCountInString(message), RichMessageUTF8CharacterLimit)
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(message), RichMessageUTF16UnitLimit)
 	}
 }
 
@@ -184,7 +214,7 @@ func TestComposeRichRecapMessagesHandlesMissingSections(t *testing.T) {
 
 func TestComposeRichRecapMessagesSeparatesOversizedCondensedSummary(t *testing.T) {
 	messages := ComposeRichRecapMessages(
-		strings.Repeat("濃", RichMessageUTF8CharacterLimit+1),
+		strings.Repeat("濃", RichMessageUTF16UnitLimit+1),
 		[]string{"Detailed summary"},
 	)
 
@@ -193,6 +223,6 @@ func TestComposeRichRecapMessagesSeparatesOversizedCondensedSummary(t *testing.T
 	require.NotContains(t, messages[1], "<details>")
 	require.Contains(t, messages[2], "<details><summary>詳細總結</summary>")
 	for _, message := range messages {
-		require.LessOrEqual(t, utf8.RuneCountInString(message), RichMessageUTF8CharacterLimit)
+		require.LessOrEqual(t, tgbot.MessageLengthInUTF16Units(message), RichMessageUTF16UnitLimit)
 	}
 }
