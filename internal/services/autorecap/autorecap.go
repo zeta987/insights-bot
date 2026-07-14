@@ -289,23 +289,14 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 
 	// 生成銳評式濃縮總結
 	condensedSummary, condensedTrace, err := m.chathistories.GenSarcasticCondensed(chatID, histories)
-	if err != nil || strings.TrimSpace(condensedSummary) == "" {
+	condensedSummary = strings.TrimSpace(condensedSummary)
+	if err != nil || condensedSummary == "" {
 		m.logger.Warn("failed to generate sarcastic condensed summary, using fallback",
 			zap.Error(err),
 			zap.Int64("chat_id", chatID),
 		)
 
-		if len(summarizations) > 0 {
-			firstSummary := []rune(strings.TrimSpace(summarizations[0]))
-			if len(firstSummary) > 120 {
-				firstSummary = firstSummary[:120]
-			}
-			condensedSummary = string(firstSummary)
-		} else {
-			condensedSummary = fmt.Sprintf("過去 %d 小時的群組聊天回顧", hours)
-		}
-	} else {
-		condensedSummary = strings.TrimSpace(condensedSummary)
+		condensedSummary = chathistories.FallbackCondensedSummary(summarizations, fmt.Sprintf("過去 %d 小時的群組聊天回顧", hours))
 	}
 
 	limiter := ratelimit.New(5)

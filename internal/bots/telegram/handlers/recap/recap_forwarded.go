@@ -104,12 +104,9 @@ func (h *CommandHandler) handleRecapForwardedCommand(c *tgbot.Context) (tgbot.Re
 	}
 
 	condensedSummary, condensedTrace, condensedErr := h.chathistories.GenSarcasticCondensedFromText(c.Update.Message.From.ID, sourceHistory.String())
-	if condensedErr != nil || strings.TrimSpace(condensedSummary) == "" {
-		fallback := []rune(strings.TrimSpace(strings.Join(summarizations, " ")))
-		if len(fallback) > 120 {
-			fallback = fallback[:120]
-		}
-		condensedSummary = string(fallback)
+	condensedSummary = strings.TrimSpace(condensedSummary)
+	if condensedErr != nil || condensedSummary == "" {
+		condensedSummary = chathistories.FallbackCondensedSummary(summarizations, "轉發訊息的聊天回顧")
 	}
 
 	initiatorName := strings.TrimSpace(c.Update.Message.From.FirstName + " " + c.Update.Message.From.LastName)

@@ -73,6 +73,24 @@ func cleanCondensedSummaryForDisplay(summary string) string {
 	return cleaned
 }
 
+const condensedSummaryFallbackRuneLimit = 120
+
+// FallbackCondensedSummary derives a condensed summary from the detailed
+// summarizations when sarcastic condensed generation fails. The joined text is
+// truncated without splitting citation links or emphasis spans, and
+// defaultSummary is used when nothing readable remains.
+func FallbackCondensedSummary(summarizations []string, defaultSummary string) string {
+	joined := strings.TrimSpace(strings.Join(summarizations, " "))
+	head, _ := splitRichMarkdownFragment(joined, condensedSummaryFallbackRuneLimit)
+
+	head = strings.TrimSpace(head)
+	if head == "" {
+		return strings.TrimSpace(defaultSummary)
+	}
+
+	return head
+}
+
 // BuildRichRecapSummary creates the always-visible Rich Markdown prefix shared
 // by manual, automatic, subscribed, and forwarded recaps.
 func BuildRichRecapSummary(config RichRecapSummaryConfig) string {

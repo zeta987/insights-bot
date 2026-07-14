@@ -1,7 +1,9 @@
 package chathistories
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai"
 	"github.com/stretchr/testify/require"
@@ -57,4 +59,44 @@ func TestBuildRichRecapSummaryAddsAutomaticAndSubscriptionNotices(t *testing.T) 
 func TestRichRecapHeadingPreservesCompleteGroupName(t *testing.T) {
 	require.Equal(t, "# 【每日聊天回顧】聊天回顧", richRecapHeading("每日聊天回顧"))
 	require.Equal(t, "# 【聊天回顧】聊天回顧", richRecapHeading("聊天回顧"))
+}
+
+func TestFallbackCondensedSummaryKeepsShortJoinedSummarizations(t *testing.T) {
+	result := FallbackCondensedSummary([]string{"第一段總結", "第二段總結"}, "預設摘要")
+	require.Equal(t, "第一段總結 第二段總結", result)
+}
+
+func TestFallbackCondensedSummaryUsesDefaultWhenSummarizationsAreBlank(t *testing.T) {
+	require.Equal(t, "過去 4 小時的群組聊天回顧", FallbackCondensedSummary([]string{"   ", "\n\t"}, "過去 4 小時的群組聊天回顧"))
+	require.Equal(t, "預設摘要", FallbackCondensedSummary(nil, "預設摘要"))
+}
+
+func TestFallbackCondensedSummaryDoesNotSliceCitationLinks(t *testing.T) {
+	prefix := strings.Repeat("聊", 100)
+	citation := "[1](https://t.me/c/1234567890/12345)"
+
+	result := FallbackCondensedSummary([]string{prefix + citation}, "預設摘要")
+
+	require.Equal(t, prefix, result)
+	require.NotContains(t, result, "[1](")
+	require.LessOrEqual(t, utf8.RuneCountInString(result), 120)
+}
+
+func TestFallbackCondensedSummaryDoesNotSliceEmphasisSpans(t *testing.T) {
+	prefix := strings.Repeat("聊", 115)
+
+	result := FallbackCondensedSummary([]string{prefix + "**重點內容**"}, "預設摘要")
+
+	require.Equal(t, prefix, result)
+	require.NotContains(t, result, "*")
+}
+
+func TestFallbackCondensedSummaryTruncatesLongTextAtNaturalBreak(t *testing.T) {
+	first := strings.Repeat("很", 80) + "。"
+	second := strings.Repeat("多", 80)
+
+	result := FallbackCondensedSummary([]string{first, second}, "預設摘要")
+
+	require.Equal(t, first, result)
+	require.LessOrEqual(t, utf8.RuneCountInString(result), 120)
 }
