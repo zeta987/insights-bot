@@ -204,7 +204,7 @@ func TestChatHistorySummarizationPromptRequestsRichMarkdown(t *testing.T) {
 
 func TestSummarizeChatHistoriesReturnsRawRichMarkdown(t *testing.T) {
 	expected := "## Topic\n\n- Decision reached {{tg-ref:1,2}}"
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "/v1/chat/completions", request.URL.Path)
 		body, err := io.ReadAll(request.Body)
 		require.NoError(t, err)
@@ -246,7 +246,7 @@ func TestSummarizeChatHistoriesReturnsRawRichMarkdown(t *testing.T) {
 
 func TestSummarizeChatHistoriesRecordsResolvedBackupModel(t *testing.T) {
 	requestedModels := make([]string, 0, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Model string `json:"model"`
 		}
@@ -298,7 +298,7 @@ func TestSummarizeChatHistoriesRecordsResolvedBackupModel(t *testing.T) {
 
 func TestSarcasticCondenseRecordsConfiguredCheckModelWithoutCallingIt(t *testing.T) {
 	requestedModels := make([]string, 0, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Model string `json:"model"`
 		}
@@ -341,7 +341,7 @@ func TestSarcasticCondenseRecordsConfiguredCheckModelWithoutCallingIt(t *testing
 
 func TestSarcasticCondenseRecordsSuccessfulCheckRepair(t *testing.T) {
 	requestedModels := make([]string, 0, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Model string `json:"model"`
 		}
@@ -390,7 +390,7 @@ func TestSarcasticCondenseRecordsSuccessfulCheckRepair(t *testing.T) {
 
 func TestSarcasticCondenseRecordsResolvedBackupModel(t *testing.T) {
 	requestedModels := make([]string, 0, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Model string `json:"model"`
 		}
@@ -437,7 +437,7 @@ func TestSarcasticCondenseRecordsResolvedBackupModel(t *testing.T) {
 }
 
 func TestSarcasticCondenseDoesNotRecordStructurallyInvalidPrimaryAsUsed(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, err := writer.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":"resolved-invalid-primary","choices":[{"index":0,"message":{"role":"assistant","content":"### 主題\n- 這仍是舊的清單結構"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`))
 		require.NoError(t, err)
@@ -464,7 +464,7 @@ func TestSarcasticCondenseDoesNotRecordStructurallyInvalidPrimaryAsUsed(t *testi
 
 func TestSarcasticCondenseCheckRepairsResolvedBackupSourceOnly(t *testing.T) {
 	requestedModels := make([]string, 0, 3)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Model string `json:"model"`
 		}
@@ -519,7 +519,7 @@ func TestSarcasticCondenseCheckRepairsResolvedBackupSourceOnly(t *testing.T) {
 
 func TestSarcasticCondenseCheckRepairsPrimaryAfterBackupTransportFailure(t *testing.T) {
 	requestedModels := make([]string, 0, 3)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Model string `json:"model"`
 		}
@@ -578,7 +578,7 @@ func TestSarcasticCondenseCheckRepairsPrimaryAfterBackupTransportFailure(t *test
 
 func TestSarcasticCondenseUsesCheckBackupWhenPrimaryCheckOutputIsInvalid(t *testing.T) {
 	requestedModels := make([]string, 0, 3)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload map[string]any
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		model, _ := payload["model"].(string)
@@ -634,7 +634,7 @@ func TestSarcasticCondenseUsesCheckBackupWhenPrimaryCheckOutputIsInvalid(t *test
 
 func TestSarcasticCondenseForcedCheckFailureSwitchesToCheckBackup(t *testing.T) {
 	requestedModels := make([]string, 0, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload map[string]any
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		model, _ := payload["model"].(string)

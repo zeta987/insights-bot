@@ -105,6 +105,10 @@ func NewClient(enableMetricRecordForTokens bool) func(NewClientParams) (Client, 
 			config.BaseURL = fmt.Sprintf("%s/v1", apiHost)
 		}
 
+		// Every blank line and keep-alive comment between two data chunks counts
+		// toward this limit, and a proxy may send many while the model thinks.
+		config.EmptyMessagesLimit = streamEmptyMessagesLimit
+
 		client := openai.NewClientWithConfig(config)
 
 		limiter := ratelimit.New(1)
@@ -355,7 +359,7 @@ func (c *OpenAIClient) callChatCompletionWithModel(
 		request.Temperature = *temperature
 	}
 
-	return c.client.CreateChatCompletion(ctx, request)
+	return c.createChatCompletion(ctx, request)
 }
 
 func (c *OpenAIClient) logWarn(message string, fields ...zap.Field) {
@@ -633,7 +637,7 @@ func (c *OpenAIClient) SplitContentBasedByTokenLimitations(textContent string, l
 func (c *OpenAIClient) SummarizeWithQuestionsAsSimplifiedChinese(ctx context.Context, title, by, content string) (*openai.ChatCompletionResponse, error) {
 	c.limiter.Take()
 
-	resp, err := c.client.CreateChatCompletion(
+	resp, err := c.createChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
 			Model: c.modelName,
@@ -692,7 +696,7 @@ func (c *OpenAIClient) SummarizeWithQuestionsAsSimplifiedChinese(ctx context.Con
 func (c *OpenAIClient) SummarizeOneChatHistory(ctx context.Context, llmFriendlyChatHistory string) (*openai.ChatCompletionResponse, error) {
 	c.limiter.Take()
 
-	resp, err := c.client.CreateChatCompletion(
+	resp, err := c.createChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
 			Model: c.modelName,
@@ -757,7 +761,7 @@ func (c *OpenAIClient) SummarizeAny(ctx context.Context, content string) (*opena
 		return nil, err
 	}
 
-	resp, err := c.client.CreateChatCompletion(
+	resp, err := c.createChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
 			Model: c.modelName,
