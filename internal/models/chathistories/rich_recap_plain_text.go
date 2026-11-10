@@ -51,7 +51,7 @@ func SplitPlainText(text string, limit int) []string {
 	remaining := text
 
 	for tgbot.MessageLengthInUTF16Units(remaining) > limit {
-		head, tail := splitFragmentAtPreferredCut(remaining, limit, plainTextProtectedSpanPatterns)
+		head, tail := splitFragmentAtPreferredCut(remaining, limit, utf16UnitBudget, plainTextProtectedSpanPatterns)
 		if head == "" {
 			break
 		}

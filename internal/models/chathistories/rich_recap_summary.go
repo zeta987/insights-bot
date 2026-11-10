@@ -83,7 +83,7 @@ const condensedSummaryFallbackUnitLimit = 120
 // defaultSummary is used when nothing readable remains.
 func FallbackCondensedSummary(summarizations []string, defaultSummary string) string {
 	joined := strings.TrimSpace(strings.Join(summarizations, " "))
-	head, _ := splitFragmentAtPreferredCut(joined, condensedSummaryFallbackUnitLimit, richMarkdownProtectedSpanPatterns)
+	head, _ := splitFragmentAtPreferredCut(joined, condensedSummaryFallbackUnitLimit, utf16UnitBudget, richMarkdownProtectedSpanPatterns)
 
 	head = strings.TrimSpace(head)
 	if head == "" {

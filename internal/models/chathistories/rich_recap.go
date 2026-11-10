@@ -11,9 +11,52 @@ import (
 	"github.com/nekomeowww/insights-bot/pkg/types/telegram"
 )
 
-// RichMessageUTF16UnitLimit is Telegram's maximum rich-message text length,
-// measured in UTF-16 code units as the Bot API counts message length.
-const RichMessageUTF16UnitLimit = 32768
+// RichMessageByteLimit caps the Markdown source of one rich message in UTF-8
+// bytes. Telegram keeps about 32768 bytes of text and link URLs per rich
+// message and silently drops whatever follows, so the source stays below that
+// with headroom. Counting UTF-16 units let CJK recaps overshoot almost
+// threefold and lose their tail.
+const RichMessageByteLimit = 30000
+
+// textBudget measures text against a delivery limit in one unit of length.
+type textBudget struct {
+	size        func(text string) int
+	runesWithin func(runes []rune, limit int) int
+}
+
+var (
+	// utf16UnitBudget matches how Telegram measures ordinary messages.
+	utf16UnitBudget = textBudget{
+		size:        tgbot.MessageLengthInUTF16Units,
+		runesWithin: tgbot.RuneCountWithinUTF16Units,
+	}
+	// utf8ByteBudget matches how Telegram measures rich messages.
+	utf8ByteBudget = textBudget{
+		size:        func(text string) int { return len(text) },
+		runesWithin: runeCountWithinUTF8Bytes,
+	}
+)
+
+// runeCountWithinUTF8Bytes reports how many leading runes fit within maxBytes
+// once encoded as UTF-8. A rune that would exceed the budget is left out.
+func runeCountWithinUTF8Bytes(runes []rune, maxBytes int) int {
+	size := 0
+
+	for index, r := range runes {
+		runeSize := utf8.RuneLen(r)
+		if runeSize < 0 {
+			// Invalid runes are encoded as the replacement character.
+			runeSize = utf8.RuneLen(utf8.RuneError)
+		}
+
+		size += runeSize
+		if size > maxBytes {
+			return index
+		}
+	}
+
+	return len(runes)
+}
 
 const (
 	richRecapDetailsOpen   = "<details><summary>詳細總結</summary>\n\n"
@@ -231,25 +274,25 @@ func ComposeRichRecapMessages(condensedSummary string, detailedSummaries []strin
 	if detailedSummary == "" {
 		return packRichMarkdownBlocks(
 			splitRichMarkdownBlocks(condensedSummary),
-			RichMessageUTF16UnitLimit,
-			RichMessageUTF16UnitLimit,
+			RichMessageByteLimit,
+			RichMessageByteLimit,
 		)
 	}
 
-	wrapperUnits := tgbot.MessageLengthInUTF16Units(richRecapDetailsOpen + richRecapDetailsClose)
-	detailBodyLimit := RichMessageUTF16UnitLimit - wrapperUnits
+	wrapperSize := utf8ByteBudget.size(richRecapDetailsOpen + richRecapDetailsClose)
+	detailBodyLimit := RichMessageByteLimit - wrapperSize
 	condensedPrefix := ""
 	if condensedSummary != "" {
 		condensedPrefix = condensedSummary + "\n\n"
 	}
-	firstDetailBodyLimit := detailBodyLimit - tgbot.MessageLengthInUTF16Units(condensedPrefix)
+	firstDetailBodyLimit := detailBodyLimit - utf8ByteBudget.size(condensedPrefix)
 
 	messages := make([]string, 0, 1)
 	if firstDetailBodyLimit <= 0 {
 		messages = append(messages, packRichMarkdownBlocks(
 			splitRichMarkdownBlocks(condensedSummary),
-			RichMessageUTF16UnitLimit,
-			RichMessageUTF16UnitLimit,
+			RichMessageByteLimit,
+			RichMessageByteLimit,
 		)...)
 		condensedPrefix = ""
 		firstDetailBodyLimit = detailBodyLimit
@@ -388,7 +431,7 @@ func packRichMarkdownBlocks(blocks []string, firstLimit, laterLimit int) []strin
 
 	for _, originalBlock := range blocks {
 		remainingBlock := originalBlock
-		remainingCount := tgbot.MessageLengthInUTF16Units(remainingBlock)
+		remainingCount := utf8ByteBudget.size(remainingBlock)
 
 		for remainingBlock != "" {
 			separator := ""
@@ -416,7 +459,7 @@ func packRichMarkdownBlocks(blocks []string, firstLimit, laterLimit int) []strin
 				continue
 			}
 
-			head, tail := splitFragmentAtPreferredCut(remainingBlock, currentLimit, richMarkdownProtectedSpanPatterns)
+			head, tail := splitFragmentAtPreferredCut(remainingBlock, currentLimit, utf8ByteBudget, richMarkdownProtectedSpanPatterns)
 			if head == "" {
 				return chunks
 			}
@@ -424,7 +467,7 @@ func packRichMarkdownBlocks(blocks []string, firstLimit, laterLimit int) []strin
 			chunks = append(chunks, head)
 			currentLimit = laterLimit
 			remainingBlock = tail
-			remainingCount = tgbot.MessageLengthInUTF16Units(remainingBlock)
+			remainingCount = utf8ByteBudget.size(remainingBlock)
 		}
 	}
 
@@ -434,12 +477,12 @@ func packRichMarkdownBlocks(blocks []string, firstLimit, laterLimit int) []strin
 	return chunks
 }
 
-// splitFragmentAtPreferredCut cuts fragment into a head of at most limit runes
-// and the remaining tail, preferring sentence boundaries and avoiding cuts
-// inside spans matched by protectedPatterns.
-func splitFragmentAtPreferredCut(fragment string, limit int, protectedPatterns []*regexp.Regexp) (string, string) {
+// splitFragmentAtPreferredCut cuts fragment into a head that fits limit, as
+// measured by budget, and the remaining tail. It prefers sentence boundaries
+// and avoids cuts inside spans matched by protectedPatterns.
+func splitFragmentAtPreferredCut(fragment string, limit int, budget textBudget, protectedPatterns []*regexp.Regexp) (string, string) {
 	runes := []rune(fragment)
-	runeLimit := tgbot.RuneCountWithinUTF16Units(runes, limit)
+	runeLimit := budget.runesWithin(runes, limit)
 	if runeLimit >= len(runes) {
 		return fragment, ""
 	}
