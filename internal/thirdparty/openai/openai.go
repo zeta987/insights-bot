@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -341,6 +342,37 @@ func normalizeStructuredCondensedOutputContent(content string) (string, error) {
 	}
 
 	return lines[0], nil
+}
+
+// recapScratchLinePattern matches lines that are program statements rather
+// than recap prose: imports, print calls, and assignments of a list, set, or
+// string literal. Models sometimes paste such working notes into the answer.
+var recapScratchLinePattern = regexp.MustCompile(
+	`(?m)^[ \t]*(?:import[ \t]+\w|from[ \t]+\w+[ \t]+import[ \t]|print\(|[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*(?:\[|\{|"|'))`,
+)
+
+// recapOutputProblem returns why a detailed recap response cannot be shown to
+// users, or an empty string when it is usable. The phrases read naturally
+// after "primary model returned" and "backup model returned".
+func recapOutputProblem(resp openai.ChatCompletionResponse) string {
+	if len(resp.Choices) == 0 {
+		return "empty recap content"
+	}
+
+	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+
+	switch {
+	case content == "":
+		return "empty recap content"
+	case strings.Contains(content, "```") || strings.Contains(content, "~~~"):
+		return "recap content with a code fence"
+	case recapScratchLinePattern.MatchString(content):
+		return "recap content with code-like working notes"
+	case resp.Choices[0].FinishReason == openai.FinishReasonLength:
+		return "recap content cut off by the output limit"
+	}
+
+	return ""
 }
 
 func (c *OpenAIClient) callChatCompletionWithModel(
@@ -854,8 +886,14 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				lastErr = backupErr
 				continue
 			}
-			if len(backupResp.Choices) == 0 || strings.TrimSpace(backupResp.Choices[0].Message.Content) == "" {
-				lastErr = errors.New("backup model returned empty recap content")
+			if problem := recapOutputProblem(backupResp); problem != "" {
+				lastErr = fmt.Errorf("backup model returned %s", problem)
+
+				c.logWarn("backup model returned an unusable recap",
+					zap.String("backup_model", backupModel),
+					zap.String("problem", problem),
+				)
+
 				continue
 			}
 
@@ -931,17 +969,21 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 	}
 	c.logVerboseTextBody("recap.raw_model_output", lo.Ternary(len(resp.Choices) > 0, resp.Choices[0].Message.Content, ""))
 
-	if len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
+	//nolint:nestif // The fallback flow predates this check; flattening it is a separate change.
+	if problem := recapOutputProblem(resp); problem != "" {
+		primaryFailureReason := "primary model returned " + problem
+
 		if len(c.recapBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
 			if trace != nil {
 				trace.Generation.PrimaryFailed = true
-				trace.Generation.PrimaryFailureReason = "primary model returned empty recap content"
+				trace.Generation.PrimaryFailureReason = primaryFailureReason
 				trace.Generation.BackupUsed = true
 			}
 
-			c.logger.Warn("primary model returned empty recap content, retrying with backup model",
+			c.logger.Warn("primary model returned an unusable recap, retrying with backup model",
 				zap.String("primary_model", c.modelName),
 				zap.String("backup_models", c.modelNameBackup),
+				zap.String("problem", problem),
 			)
 
 			backupResp, _, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_empty_content")
@@ -963,9 +1005,10 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		} else {
 			if trace != nil {
 				trace.Generation.PrimaryFailed = true
-				trace.Generation.PrimaryFailureReason = "primary model returned empty recap content"
+				trace.Generation.PrimaryFailureReason = primaryFailureReason
 			}
-			return nil, errors.New("primary model returned empty recap content")
+
+			return nil, errors.New(primaryFailureReason)
 		}
 	}
 
