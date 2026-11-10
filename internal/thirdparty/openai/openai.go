@@ -886,6 +886,9 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				lastErr = backupErr
 				continue
 			}
+
+			c.removeRecapNoise(ctx, &backupResp)
+
 			if problem := recapOutputProblem(backupResp); problem != "" {
 				lastErr = fmt.Errorf("backup model returned %s", problem)
 
@@ -920,6 +923,8 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		messages,
 		nil,
 	)
+	primaryAnswered := err == nil
+
 	if err != nil {
 		if shouldFallbackByError(err) && len(c.recapBackupModels()) > 0 {
 			if trace != nil {
@@ -968,6 +973,11 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		}
 	}
 	c.logVerboseTextBody("recap.raw_model_output", lo.Ternary(len(resp.Choices) > 0, resp.Choices[0].Message.Content, ""))
+
+	// Backup answers were already inspected when they were fetched.
+	if primaryAnswered {
+		c.removeRecapNoise(ctx, &resp)
+	}
 
 	//nolint:nestif // The fallback flow predates this check; flattening it is a separate change.
 	if problem := recapOutputProblem(resp); problem != "" {
