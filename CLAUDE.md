@@ -149,6 +149,10 @@ Branching, deployment, push, and release rules are kept in `AGENTS.md` so every 
 
 @AGENTS.md
 
+Maintainer-local notes, when the gitignored file exists:
+
+@AGENTS.local.md
+
 ## Agent skills
 
 ### Issue tracker

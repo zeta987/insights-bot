@@ -78,3 +78,7 @@ temp/
 .cursor/
 openspec/
 .agents/
+
+# Maintainer-local agent notes
+AGENTS.local.md
+CLAUDE.local.md
