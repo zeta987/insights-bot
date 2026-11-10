@@ -24,11 +24,29 @@ import (
 
 var client *OpenAIClient
 
-func TestDefaultCondensedPromptsRequestOneLinerRoast(t *testing.T) {
-	require.Contains(t, SarcasticCondensedSystemPrompt, "一句话")
-	require.Contains(t, SarcasticCondensedSystemPrompt, "歇后语")
+func TestDefaultCondensedPromptsRequestSingleParagraphOverview(t *testing.T) {
+	require.Contains(t, SarcasticCondensedSystemPrompt, "一个自然段")
+	require.Contains(t, SarcasticCondensedSystemPrompt, "200-300 字")
 	require.Contains(t, SarcasticCondensedSystemPrompt, "不允许分行")
+	require.Contains(t, SarcasticCondensedSystemPrompt, "不编造")
+	require.NotContains(t, SarcasticCondensedSystemPrompt, "锐评")
+
+	var userPrompt strings.Builder
+	require.NoError(t, SarcasticCondensedUserPrompt.Execute(&userPrompt, SarcasticCondensedSummaryInputs{ChatHistory: "msgId:1: A sent: hi"}))
+	require.Contains(t, userPrompt.String(), "200-300 字")
+	require.Contains(t, userPrompt.String(), "msgId:1: A sent: hi")
+
 	require.Contains(t, CheckCondensedOutputSystemPrompt, "ONE line")
+	require.Contains(t, CheckCondensedOutputSystemPrompt, "200-300 characters")
+}
+
+func TestNormalizeStructuredCondensedOutputAcceptsOverviewParagraph(t *testing.T) {
+	overview := "**Droid 与 Claude 官方订阅**之争占了大半篇幅：有人推荐 Droid 来避开封号，多数人认为它额度太少，不如多开几个 Claude Pro；**写作模型**方面，jacobz 觉得 `MiniMax 3.1 Flash` 文字最好，Nikola 说它最烂。"
+
+	normalized, err := normalizeStructuredCondensedOutputContent(overview)
+
+	require.NoError(t, err)
+	require.Equal(t, overview, normalized)
 }
 
 func TestNormalizeStructuredCondensedOutputAcceptsSingleRoastLine(t *testing.T) {

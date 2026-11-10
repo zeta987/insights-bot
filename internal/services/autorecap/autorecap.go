@@ -287,7 +287,7 @@ func (m *AutoRecapService) summarize(chatID int64, options *ent.TelegramChatReca
 		return
 	}
 
-	// 生成銳評式濃縮總結
+	// 生成濃縮總結
 	condensedSummary, condensedTrace, err := m.chathistories.GenSarcasticCondensed(chatID, histories)
 	condensedSummary = strings.TrimSpace(condensedSummary)
 	if err != nil || condensedSummary == "" {

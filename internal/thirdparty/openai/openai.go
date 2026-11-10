@@ -312,9 +312,9 @@ func isCondensedUnorderedListItem(line string) bool {
 	return strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ")
 }
 
-// normalizeStructuredCondensedOutputContent validates the roast-style
-// condensed summary: exactly one sentence-like line with no headings or
-// unordered-list markers. Inline bold/italic/code and punctuation are allowed.
+// normalizeStructuredCondensedOutputContent validates the condensed overview:
+// exactly one paragraph on a single line with no headings or unordered-list
+// markers. Inline bold/italic/code and punctuation are allowed.
 func normalizeStructuredCondensedOutputContent(content string) (string, error) {
 	normalized, err := normalizeCondensedOutputContent(content)
 	if err != nil {
