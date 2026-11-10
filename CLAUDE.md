@@ -143,6 +143,12 @@ SARCASTIC_CONDENSED_MODEL_NAME=  # Optional: for sarcastic mode
 - Use structured logging with appropriate log levels
 - Check health endpoint at `:7069/` for service status
 
+## Shared agent rules
+
+Branching, deployment, push, and release rules are kept in `AGENTS.md` so every coding agent reads the same text:
+
+@AGENTS.md
+
 ## Agent skills
 
 ### Issue tracker

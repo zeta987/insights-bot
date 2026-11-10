@@ -50,7 +50,14 @@
 ## Remote & PR Policy
 - `origin` = `git@github.com:zeta987/insights-bot.git` (the maintainer's fork). `upstream` = `git@github.com:nekomeowww/insights-bot.git`.
 - NEVER open pull requests against upstream, never push to upstream, and never target `upstream/main` in any `gh` command. `gh` defaults can resolve to upstream — always pass `--repo zeta987/insights-bot` explicitly.
-- Integration is local-first: merge local branches directly (feature -> `develop`; `develop` -> `main`/production when the maintainer says it is stable), or at most open a PR within the origin fork (e.g., feature branch -> own `main`).
+- Integration is local-first: merge local branches directly (feature -> `main`; `main` -> `production` when the maintainer says it is stable), or at most open a PR within the origin fork (e.g., feature branch -> own `main`).
+
+## Branch & Deployment Flow
+- Two long-lived branches only: `main` and `production`. There is no `develop` branch; do not recreate it.
+- `main` is the development branch and the GitHub default. Day-to-day work lands here, directly or through short-lived `feat/`, `fix/`, or `dev/` branches that are deleted after merging. Pushing `main` runs CI and deploys nothing.
+- `production` is what runs live. Dokploy (project `HZ-FI_Insights-bot`, application `insights-bot`) auto-deploys on every push to `production`, so a push there is a release to the real bot.
+- Going live: verify the change on Telegram with the local dev run first, then fast-forward `production` to the tested `main` commit (`git push origin main:production`). Never commit directly on `production` and never force-push it; it must stay an ancestor of `main`.
+- Pushing `production` needs the maintainer's explicit request each time, the same as any other push.
 
 ## Worktree Protocol
 - Parallel tasks run in `.claude/worktrees/*` on `claude/*` branches.
