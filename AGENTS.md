@@ -24,6 +24,7 @@
 - Tests are Go `*_test.go` files (e.g., `internal/models/chathistories/recap_test.go`).
 - Run all tests with `go test ./...`.
 - If you add new logic, add or extend tests in the nearest package.
+- Lint with golangci-lint v2 (config in `.golangci.yml`). Before committing Go changes, run `golangci-lint run --new-from-rev=HEAD` and fix every issue it reports; older issues in untouched code are out of scope. A local `pre-commit` hook may run the same check, so never bypass hooks with `--no-verify`.
 
 ## Commit & Pull Request Guidelines
 - Commit messages follow Conventional Commits: `feat:`, `fix:`, `chore:` with optional scopes (e.g., `chore(deps): ...`). `[i18n] ...` is also used for translation updates.
