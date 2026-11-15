@@ -44,6 +44,21 @@ type MockClient struct {
 	getSarcasticCondensedModelNameReturnsOnCall map[int]struct {
 		result1 string
 	}
+	MergeChatHistoriesRecapsStub        func(context.Context, []string, string) (*openaia.ChatCompletionResponse, error)
+	mergeChatHistoriesRecapsMutex       sync.RWMutex
+	mergeChatHistoriesRecapsArgsForCall []struct {
+		arg1 context.Context
+		arg2 []string
+		arg3 string
+	}
+	mergeChatHistoriesRecapsReturns struct {
+		result1 *openaia.ChatCompletionResponse
+		result2 error
+	}
+	mergeChatHistoriesRecapsReturnsOnCall map[int]struct {
+		result1 *openaia.ChatCompletionResponse
+		result2 error
+	}
 	ReviewMediaDescriptionStub        func(context.Context, openai.MediaReviewRequest) (string, error)
 	reviewMediaDescriptionMutex       sync.RWMutex
 	reviewMediaDescriptionArgsForCall []struct {
@@ -328,6 +343,77 @@ func (fake *MockClient) GetSarcasticCondensedModelNameReturnsOnCall(i int, resul
 	fake.getSarcasticCondensedModelNameReturnsOnCall[i] = struct {
 		result1 string
 	}{result1}
+}
+
+func (fake *MockClient) MergeChatHistoriesRecaps(arg1 context.Context, arg2 []string, arg3 string) (*openaia.ChatCompletionResponse, error) {
+	var arg2Copy []string
+	if arg2 != nil {
+		arg2Copy = make([]string, len(arg2))
+		copy(arg2Copy, arg2)
+	}
+	fake.mergeChatHistoriesRecapsMutex.Lock()
+	ret, specificReturn := fake.mergeChatHistoriesRecapsReturnsOnCall[len(fake.mergeChatHistoriesRecapsArgsForCall)]
+	fake.mergeChatHistoriesRecapsArgsForCall = append(fake.mergeChatHistoriesRecapsArgsForCall, struct {
+		arg1 context.Context
+		arg2 []string
+		arg3 string
+	}{arg1, arg2Copy, arg3})
+	stub := fake.MergeChatHistoriesRecapsStub
+	fakeReturns := fake.mergeChatHistoriesRecapsReturns
+	fake.recordInvocation("MergeChatHistoriesRecaps", []interface{}{arg1, arg2Copy, arg3})
+	fake.mergeChatHistoriesRecapsMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2, arg3)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *MockClient) MergeChatHistoriesRecapsCallCount() int {
+	fake.mergeChatHistoriesRecapsMutex.RLock()
+	defer fake.mergeChatHistoriesRecapsMutex.RUnlock()
+	return len(fake.mergeChatHistoriesRecapsArgsForCall)
+}
+
+func (fake *MockClient) MergeChatHistoriesRecapsCalls(stub func(context.Context, []string, string) (*openaia.ChatCompletionResponse, error)) {
+	fake.mergeChatHistoriesRecapsMutex.Lock()
+	defer fake.mergeChatHistoriesRecapsMutex.Unlock()
+	fake.MergeChatHistoriesRecapsStub = stub
+}
+
+func (fake *MockClient) MergeChatHistoriesRecapsArgsForCall(i int) (context.Context, []string, string) {
+	fake.mergeChatHistoriesRecapsMutex.RLock()
+	defer fake.mergeChatHistoriesRecapsMutex.RUnlock()
+	argsForCall := fake.mergeChatHistoriesRecapsArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
+func (fake *MockClient) MergeChatHistoriesRecapsReturns(result1 *openaia.ChatCompletionResponse, result2 error) {
+	fake.mergeChatHistoriesRecapsMutex.Lock()
+	defer fake.mergeChatHistoriesRecapsMutex.Unlock()
+	fake.MergeChatHistoriesRecapsStub = nil
+	fake.mergeChatHistoriesRecapsReturns = struct {
+		result1 *openaia.ChatCompletionResponse
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *MockClient) MergeChatHistoriesRecapsReturnsOnCall(i int, result1 *openaia.ChatCompletionResponse, result2 error) {
+	fake.mergeChatHistoriesRecapsMutex.Lock()
+	defer fake.mergeChatHistoriesRecapsMutex.Unlock()
+	fake.MergeChatHistoriesRecapsStub = nil
+	if fake.mergeChatHistoriesRecapsReturnsOnCall == nil {
+		fake.mergeChatHistoriesRecapsReturnsOnCall = make(map[int]struct {
+			result1 *openaia.ChatCompletionResponse
+			result2 error
+		})
+	}
+	fake.mergeChatHistoriesRecapsReturnsOnCall[i] = struct {
+		result1 *openaia.ChatCompletionResponse
+		result2 error
+	}{result1, result2}
 }
 
 func (fake *MockClient) ReviewMediaDescription(arg1 context.Context, arg2 openai.MediaReviewRequest) (string, error) {
@@ -856,6 +942,8 @@ func (fake *MockClient) Invocations() map[string][][]interface{} {
 	defer fake.getModelNameMutex.RUnlock()
 	fake.getSarcasticCondensedModelNameMutex.RLock()
 	defer fake.getSarcasticCondensedModelNameMutex.RUnlock()
+	fake.mergeChatHistoriesRecapsMutex.RLock()
+	defer fake.mergeChatHistoriesRecapsMutex.RUnlock()
 	fake.reviewMediaDescriptionMutex.RLock()
 	defer fake.reviewMediaDescriptionMutex.RUnlock()
 	fake.sarcasticCondenseMutex.RLock()

@@ -30,6 +30,7 @@ import (
 type Client interface {
 	GetModelName() string
 	GetSarcasticCondensedModelName() string
+	MergeChatHistoriesRecaps(ctx context.Context, recaps []string, language string) (*openai.ChatCompletionResponse, error)
 	SplitContentBasedByTokenLimitations(textContent string, limits int) []string
 	SummarizeAny(ctx context.Context, content string) (*openai.ChatCompletionResponse, error)
 	SummarizeChatHistories(ctx context.Context, llmFriendlyChatHistories string, language string) (*openai.ChatCompletionResponse, error)
@@ -902,6 +903,21 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		},
 	}
 
+	return c.completeRecap(ctx, "recap", "Summarize Chat Histories", messages)
+}
+
+// completeRecap sends a detailed recap request to the primary model, falls
+// back to the backup models when the primary fails or returns an unusable
+// recap, and records token usage under metricOperation. operation prefixes
+// the names used in verbose payload logs.
+func (c *OpenAIClient) completeRecap(
+	ctx context.Context,
+	operation string,
+	metricOperation string,
+	messages []openai.ChatCompletionMessage,
+) (*openai.ChatCompletionResponse, error) {
+	trace := recapExecutionTraceFromContext(ctx)
+
 	tryRecapBackupModels := func(operationPrefix string) (openai.ChatCompletionResponse, string, string, error) {
 		var lastErr error
 		for idx, backupModel := range c.recapBackupModels() {
@@ -948,7 +964,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 
 	resp, err := c.callChatCompletionWithModelAndVerboseLog(
 		ctx,
-		"recap_primary",
+		operation+"_primary",
 		c.modelName,
 		messages,
 		nil,
@@ -969,7 +985,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				zap.Error(err),
 			)
 
-			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_primary_error")
+			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels(operation + "_backup_after_primary_error")
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
@@ -1027,7 +1043,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				zap.String("problem", problem),
 			)
 
-			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_empty_content")
+			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels(operation + "_backup_after_empty_content")
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
@@ -1061,7 +1077,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 	if c.enableMetricRecordForTokens {
 		err = c.ent.MetricOpenAIChatCompletionTokenUsage.
 			Create().
-			SetPromptOperation("Summarize Chat Histories").
+			SetPromptOperation(metricOperation).
 			SetPromptTokenUsage(resp.Usage.PromptTokens).
 			SetCompletionTokenUsage(resp.Usage.CompletionTokens).
 			SetTotalTokenUsage(resp.Usage.TotalTokens).
@@ -1070,7 +1086,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 		if err != nil {
 			c.logger.Error("failed to create metric openai chat completion token usage",
 				zap.Error(err),
-				zap.String("prompt_operation", "Summarize Chat Histories"),
+				zap.String("prompt_operation", metricOperation),
 				zap.Int("prompt_token_usage", resp.Usage.PromptTokens),
 				zap.Int("completion_token_usage", resp.Usage.CompletionTokens),
 				zap.Int("total_token_usage", resp.Usage.TotalTokens),
