@@ -10,6 +10,20 @@ import (
 )
 
 type MockClient struct {
+	DescribeMediaStub        func(context.Context, openai.MediaDescriptionRequest) (string, error)
+	describeMediaMutex       sync.RWMutex
+	describeMediaArgsForCall []struct {
+		arg1 context.Context
+		arg2 openai.MediaDescriptionRequest
+	}
+	describeMediaReturns struct {
+		result1 string
+		result2 error
+	}
+	describeMediaReturnsOnCall map[int]struct {
+		result1 string
+		result2 error
+	}
 	GetModelNameStub        func() string
 	getModelNameMutex       sync.RWMutex
 	getModelNameArgsForCall []struct {
@@ -29,6 +43,20 @@ type MockClient struct {
 	}
 	getSarcasticCondensedModelNameReturnsOnCall map[int]struct {
 		result1 string
+	}
+	ReviewMediaDescriptionStub        func(context.Context, openai.MediaReviewRequest) (string, error)
+	reviewMediaDescriptionMutex       sync.RWMutex
+	reviewMediaDescriptionArgsForCall []struct {
+		arg1 context.Context
+		arg2 openai.MediaReviewRequest
+	}
+	reviewMediaDescriptionReturns struct {
+		result1 string
+		result2 error
+	}
+	reviewMediaDescriptionReturnsOnCall map[int]struct {
+		result1 string
+		result2 error
 	}
 	SarcasticCondenseStub        func(context.Context, string) (string, error)
 	sarcasticCondenseMutex       sync.RWMutex
@@ -129,6 +157,71 @@ type MockClient struct {
 	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
+}
+
+func (fake *MockClient) DescribeMedia(arg1 context.Context, arg2 openai.MediaDescriptionRequest) (string, error) {
+	fake.describeMediaMutex.Lock()
+	ret, specificReturn := fake.describeMediaReturnsOnCall[len(fake.describeMediaArgsForCall)]
+	fake.describeMediaArgsForCall = append(fake.describeMediaArgsForCall, struct {
+		arg1 context.Context
+		arg2 openai.MediaDescriptionRequest
+	}{arg1, arg2})
+	stub := fake.DescribeMediaStub
+	fakeReturns := fake.describeMediaReturns
+	fake.recordInvocation("DescribeMedia", []interface{}{arg1, arg2})
+	fake.describeMediaMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *MockClient) DescribeMediaCallCount() int {
+	fake.describeMediaMutex.RLock()
+	defer fake.describeMediaMutex.RUnlock()
+	return len(fake.describeMediaArgsForCall)
+}
+
+func (fake *MockClient) DescribeMediaCalls(stub func(context.Context, openai.MediaDescriptionRequest) (string, error)) {
+	fake.describeMediaMutex.Lock()
+	defer fake.describeMediaMutex.Unlock()
+	fake.DescribeMediaStub = stub
+}
+
+func (fake *MockClient) DescribeMediaArgsForCall(i int) (context.Context, openai.MediaDescriptionRequest) {
+	fake.describeMediaMutex.RLock()
+	defer fake.describeMediaMutex.RUnlock()
+	argsForCall := fake.describeMediaArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *MockClient) DescribeMediaReturns(result1 string, result2 error) {
+	fake.describeMediaMutex.Lock()
+	defer fake.describeMediaMutex.Unlock()
+	fake.DescribeMediaStub = nil
+	fake.describeMediaReturns = struct {
+		result1 string
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *MockClient) DescribeMediaReturnsOnCall(i int, result1 string, result2 error) {
+	fake.describeMediaMutex.Lock()
+	defer fake.describeMediaMutex.Unlock()
+	fake.DescribeMediaStub = nil
+	if fake.describeMediaReturnsOnCall == nil {
+		fake.describeMediaReturnsOnCall = make(map[int]struct {
+			result1 string
+			result2 error
+		})
+	}
+	fake.describeMediaReturnsOnCall[i] = struct {
+		result1 string
+		result2 error
+	}{result1, result2}
 }
 
 func (fake *MockClient) GetModelName() string {
@@ -235,6 +328,71 @@ func (fake *MockClient) GetSarcasticCondensedModelNameReturnsOnCall(i int, resul
 	fake.getSarcasticCondensedModelNameReturnsOnCall[i] = struct {
 		result1 string
 	}{result1}
+}
+
+func (fake *MockClient) ReviewMediaDescription(arg1 context.Context, arg2 openai.MediaReviewRequest) (string, error) {
+	fake.reviewMediaDescriptionMutex.Lock()
+	ret, specificReturn := fake.reviewMediaDescriptionReturnsOnCall[len(fake.reviewMediaDescriptionArgsForCall)]
+	fake.reviewMediaDescriptionArgsForCall = append(fake.reviewMediaDescriptionArgsForCall, struct {
+		arg1 context.Context
+		arg2 openai.MediaReviewRequest
+	}{arg1, arg2})
+	stub := fake.ReviewMediaDescriptionStub
+	fakeReturns := fake.reviewMediaDescriptionReturns
+	fake.recordInvocation("ReviewMediaDescription", []interface{}{arg1, arg2})
+	fake.reviewMediaDescriptionMutex.Unlock()
+	if stub != nil {
+		return stub(arg1, arg2)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *MockClient) ReviewMediaDescriptionCallCount() int {
+	fake.reviewMediaDescriptionMutex.RLock()
+	defer fake.reviewMediaDescriptionMutex.RUnlock()
+	return len(fake.reviewMediaDescriptionArgsForCall)
+}
+
+func (fake *MockClient) ReviewMediaDescriptionCalls(stub func(context.Context, openai.MediaReviewRequest) (string, error)) {
+	fake.reviewMediaDescriptionMutex.Lock()
+	defer fake.reviewMediaDescriptionMutex.Unlock()
+	fake.ReviewMediaDescriptionStub = stub
+}
+
+func (fake *MockClient) ReviewMediaDescriptionArgsForCall(i int) (context.Context, openai.MediaReviewRequest) {
+	fake.reviewMediaDescriptionMutex.RLock()
+	defer fake.reviewMediaDescriptionMutex.RUnlock()
+	argsForCall := fake.reviewMediaDescriptionArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2
+}
+
+func (fake *MockClient) ReviewMediaDescriptionReturns(result1 string, result2 error) {
+	fake.reviewMediaDescriptionMutex.Lock()
+	defer fake.reviewMediaDescriptionMutex.Unlock()
+	fake.ReviewMediaDescriptionStub = nil
+	fake.reviewMediaDescriptionReturns = struct {
+		result1 string
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *MockClient) ReviewMediaDescriptionReturnsOnCall(i int, result1 string, result2 error) {
+	fake.reviewMediaDescriptionMutex.Lock()
+	defer fake.reviewMediaDescriptionMutex.Unlock()
+	fake.ReviewMediaDescriptionStub = nil
+	if fake.reviewMediaDescriptionReturnsOnCall == nil {
+		fake.reviewMediaDescriptionReturnsOnCall = make(map[int]struct {
+			result1 string
+			result2 error
+		})
+	}
+	fake.reviewMediaDescriptionReturnsOnCall[i] = struct {
+		result1 string
+		result2 error
+	}{result1, result2}
 }
 
 func (fake *MockClient) SarcasticCondense(arg1 context.Context, arg2 string) (string, error) {
@@ -692,10 +850,14 @@ func (fake *MockClient) TruncateContentBasedOnTokensReturnsOnCall(i int, result1
 func (fake *MockClient) Invocations() map[string][][]interface{} {
 	fake.invocationsMutex.RLock()
 	defer fake.invocationsMutex.RUnlock()
+	fake.describeMediaMutex.RLock()
+	defer fake.describeMediaMutex.RUnlock()
 	fake.getModelNameMutex.RLock()
 	defer fake.getModelNameMutex.RUnlock()
 	fake.getSarcasticCondensedModelNameMutex.RLock()
 	defer fake.getSarcasticCondensedModelNameMutex.RUnlock()
+	fake.reviewMediaDescriptionMutex.RLock()
+	defer fake.reviewMediaDescriptionMutex.RUnlock()
 	fake.sarcasticCondenseMutex.RLock()
 	defer fake.sarcasticCondenseMutex.RUnlock()
 	fake.splitContentBasedByTokenLimitationsMutex.RLock()

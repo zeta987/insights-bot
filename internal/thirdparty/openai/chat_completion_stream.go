@@ -20,7 +20,36 @@ const streamEmptyMessagesLimit = 10000
 type streamedChoice struct {
 	role         string
 	content      strings.Builder
+	toolCalls    []openai.ToolCall
 	finishReason openai.FinishReason
+}
+
+// addToolCallDelta merges one streamed piece of a tool call. The first piece
+// carries the id and name; later pieces append to the arguments.
+func (c *streamedChoice) addToolCallDelta(delta openai.ToolCall) {
+	index := len(c.toolCalls) - 1
+
+	switch {
+	case delta.Index != nil:
+		index = *delta.Index
+	case delta.ID != "" || index < 0:
+		index = len(c.toolCalls)
+	}
+
+	for len(c.toolCalls) <= index {
+		c.toolCalls = append(c.toolCalls, openai.ToolCall{})
+	}
+
+	call := &c.toolCalls[index]
+	if delta.ID != "" {
+		call.ID = delta.ID
+	}
+	if delta.Type != "" {
+		call.Type = delta.Type
+	}
+
+	call.Function.Name += delta.Function.Name
+	call.Function.Arguments += delta.Function.Arguments
 }
 
 // createChatCompletion sends the request as a stream and assembles the chunks
@@ -84,6 +113,11 @@ func (c *OpenAIClient) createChatCompletion(
 				choice.role = delta.Delta.Role
 			}
 			choice.content.WriteString(delta.Delta.Content)
+
+			for _, toolCall := range delta.Delta.ToolCalls {
+				choice.addToolCallDelta(toolCall)
+			}
+
 			if delta.FinishReason != "" {
 				choice.finishReason = delta.FinishReason
 			}
@@ -110,8 +144,9 @@ func (c *OpenAIClient) createChatCompletion(
 		resp.Choices = append(resp.Choices, openai.ChatCompletionChoice{
 			Index: index,
 			Message: openai.ChatCompletionMessage{
-				Role:    role,
-				Content: choice.content.String(),
+				Role:      role,
+				Content:   choice.content.String(),
+				ToolCalls: choice.toolCalls,
 			},
 			FinishReason: choice.finishReason,
 		})

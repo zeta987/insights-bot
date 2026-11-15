@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/nekomeowww/xo"
 	"github.com/samber/lo"
@@ -75,6 +76,20 @@ const (
 	EnvSarcasticCondensedModelNameBackup = "SARCASTIC_CONDENSED_MODEL_NAME_backup"
 	// Chat histories summarization language
 	EnvChatHistoriesSummarizationLanguage = "CHAT_HISTORIES_SUMMARIZATION_LANGUAGE"
+
+	// Media understanding: recording media messages and describing them with a model.
+	EnvMediaUnderstandingEnabled         = "MEDIA_UNDERSTANDING_ENABLED"
+	EnvMediaUnderstandingModelName       = "MEDIA_UNDERSTANDING_MODEL_NAME"
+	EnvMediaUnderstandingMaxFileMB       = "MEDIA_UNDERSTANDING_MAX_FILE_MB"
+	EnvMediaUnderstandingMaxVoiceSeconds = "MEDIA_UNDERSTANDING_MAX_VOICE_SECONDS"
+	EnvMediaUnderstandingMaxVideoSeconds = "MEDIA_UNDERSTANDING_MAX_VIDEO_SECONDS"
+)
+
+const (
+	defaultMediaUnderstandingMaxFileMB       = 10
+	maxMediaUnderstandingMaxFileMB           = 20 // getFile limit of the cloud Bot API
+	defaultMediaUnderstandingMaxVoiceSeconds = 300
+	defaultMediaUnderstandingMaxVideoSeconds = 180
 )
 
 type SectionPineconeIndexes struct {
@@ -143,10 +158,21 @@ type SectionOpenAI struct {
 	ChatHistoriesSummarizationLanguage  string
 }
 
+// SectionMediaUnderstanding controls how media messages enter chat histories.
+// When Enabled is false, media without text is not recorded at all, as before.
+type SectionMediaUnderstanding struct {
+	Enabled         bool
+	ModelName       string
+	MaxFileBytes    int64
+	MaxVoiceSeconds int
+	MaxVideoSeconds int
+}
+
 type Config struct {
 	TimezoneShiftSeconds int64
 	Telegram             SectionTelegram
 	OpenAI               SectionOpenAI
+	MediaUnderstanding   SectionMediaUnderstanding
 	Pinecone             SectionPinecone
 	CloverDBPath         string
 	DB                   SectionDB
@@ -166,6 +192,36 @@ type Config struct {
 	SarcasticCondensedSystemPrompt string
 	// Sarcastic condensed user prompt
 	SarcasticCondensedUserPrompt string
+}
+
+func parseMediaUnderstanding(getEnv func(string) string) SectionMediaUnderstanding {
+	enabled := getEnv(EnvMediaUnderstandingEnabled)
+
+	maxFileMB, err := strconv.ParseInt(getEnv(EnvMediaUnderstandingMaxFileMB), 10, 64)
+	if err != nil || maxFileMB <= 0 {
+		maxFileMB = defaultMediaUnderstandingMaxFileMB
+	}
+	if maxFileMB > maxMediaUnderstandingMaxFileMB {
+		maxFileMB = maxMediaUnderstandingMaxFileMB
+	}
+
+	maxVoiceSeconds, err := strconv.Atoi(getEnv(EnvMediaUnderstandingMaxVoiceSeconds))
+	if err != nil || maxVoiceSeconds <= 0 {
+		maxVoiceSeconds = defaultMediaUnderstandingMaxVoiceSeconds
+	}
+
+	maxVideoSeconds, err := strconv.Atoi(getEnv(EnvMediaUnderstandingMaxVideoSeconds))
+	if err != nil || maxVideoSeconds <= 0 {
+		maxVideoSeconds = defaultMediaUnderstandingMaxVideoSeconds
+	}
+
+	return SectionMediaUnderstanding{
+		Enabled:         enabled == "true" || enabled == "1",
+		ModelName:       strings.TrimSpace(getEnv(EnvMediaUnderstandingModelName)),
+		MaxFileBytes:    maxFileMB << 20,
+		MaxVoiceSeconds: maxVoiceSeconds,
+		MaxVideoSeconds: maxVideoSeconds,
+	}
 }
 
 func NewConfig() func() (*Config, error) {
@@ -234,6 +290,7 @@ func NewConfig() func() (*Config, error) {
 		autoRecapTestEnabled := getEnv(EnvAutoRecapTestEnabled) == "true" || getEnv(EnvAutoRecapTestEnabled) == "1"
 
 		return &Config{
+			MediaUnderstanding:   parseMediaUnderstanding(getEnv),
 			TimezoneShiftSeconds: lo.Ternary(timezoneShiftSecondsParseErr == nil, lo.Ternary(timezoneShiftSeconds != 0, timezoneShiftSeconds, 0), 0),
 			Telegram: SectionTelegram{
 				BotToken:       getEnv(EnvTelegramBotToken),

@@ -37,6 +37,8 @@ type Client interface {
 	SummarizeWithQuestionsAsSimplifiedChinese(ctx context.Context, title string, by string, content string) (*openai.ChatCompletionResponse, error)
 	TruncateContentBasedOnTokens(textContent string, limits int) string
 	SarcasticCondense(ctx context.Context, chatHistory string) (string, error)
+	DescribeMedia(ctx context.Context, request MediaDescriptionRequest) (string, error)
+	ReviewMediaDescription(ctx context.Context, request MediaReviewRequest) (string, error)
 }
 
 var _ Client = (*OpenAIClient)(nil)
@@ -52,6 +54,10 @@ type OpenAIClient struct {
 	forceCheckModelFailure              bool
 	enableVerbosePayloadLogs            bool
 	defaultSummarizationLanguage        string
+	mediaModelName                      string
+	// mediaLimiter keeps a burst of media messages from taking the shared
+	// limiter's slots away from recap and summarization calls.
+	mediaLimiter ratelimit.Limiter
 
 	tiktokenEncoding            *tiktoken.Tiktoken
 	client                      *openai.Client
@@ -133,6 +139,8 @@ func NewClient(enableMetricRecordForTokens bool) func(NewClientParams) (Client, 
 			forceCheckModelFailure:              params.Config.OpenAI.ForceCheckModelFailure,
 			enableVerbosePayloadLogs:            params.Config.OpenAI.EnableVerbosePayloadLogs,
 			defaultSummarizationLanguage:        lo.Ternary(params.Config.OpenAI.ChatHistoriesSummarizationLanguage == "", "Simplified Chinese", params.Config.OpenAI.ChatHistoriesSummarizationLanguage),
+			mediaModelName:                      lo.Ternary(params.Config.MediaUnderstanding.ModelName == "", primaryModel, params.Config.MediaUnderstanding.ModelName),
+			mediaLimiter:                        ratelimit.New(2),
 			client:                              client,
 			tiktokenEncoding:                    tokenizer,
 			ent:                                 params.Ent,
