@@ -429,9 +429,17 @@ func formatFullNameAndUsername(fullName, username string) string {
 }
 
 func buildRichRecapPrompt(histories []*ent.ChatHistories) (string, map[int64]int64) {
-	lines := make([]string, 0, len(histories))
 	virtualToReal := make(map[int64]int64, len(histories))
-	nextVirtualID := int64(1)
+	prompt, _ := appendRichRecapPrompt(histories, virtualToReal, 1)
+
+	return prompt, virtualToReal
+}
+
+// appendRichRecapPrompt formats histories for the recap model with virtual
+// message IDs starting at nextVirtualID, records them in virtualToReal, and
+// returns the next unused virtual ID.
+func appendRichRecapPrompt(histories []*ent.ChatHistories, virtualToReal map[int64]int64, nextVirtualID int64) (string, int64) {
+	lines := make([]string, 0, len(histories))
 
 	for _, message := range histories {
 		messageVirtualID := nextVirtualID
@@ -465,7 +473,7 @@ func buildRichRecapPrompt(histories []*ent.ChatHistories) (string, map[int64]int
 		))
 	}
 
-	return strings.Join(lines, "\n"), virtualToReal
+	return strings.Join(lines, "\n"), nextVirtualID
 }
 
 func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType, histories []*ent.ChatHistories) (uuid.UUID, []string, *openai.RecapExecutionTrace, error) {
@@ -484,18 +492,8 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 		}
 	}
 
-	modelName := m.openAI.GetModelName()
-	if recapTrace != nil {
-		if recapTrace.Generation.BackupUsed && recapTrace.Generation.BackupSucceeded {
-			if recapTrace.Generation.BackupUsedModel != "" {
-				modelName = recapTrace.Generation.BackupUsedModel
-			} else if recapTrace.Generation.BackupModel != "" {
-				modelName = recapTrace.Generation.BackupModel
-			}
-		} else if recapTrace.Generation.PrimaryUsedModel != "" {
-			modelName = recapTrace.Generation.PrimaryUsedModel
-		}
-	}
+	modelName := m.recapModelName(recapTrace)
+	firstMessageID, lastMessageID := messageIDRange(histories)
 
 	saved, err := m.ent.LogChatHistoriesRecap.
 		Create().
@@ -508,12 +506,50 @@ func (m *Model) SummarizeChatHistories(chatID int64, chatType telegram.ChatType,
 		SetFromPlatform(int(FromPlatformTelegram)).
 		SetRecapType(int(RecapTypeForGroup)).
 		SetModelName(modelName).
+		SetFirstMessageID(firstMessageID).
+		SetLastMessageID(lastMessageID).
 		Save(context.Background())
 	if err != nil {
 		return uuid.Nil, make([]string, 0), recapTrace, err
 	}
 
 	return saved.ID, resolvedSummaries, recapTrace, nil
+}
+
+// recapModelName is the model recorded for a recap generated with trace.
+func (m *Model) recapModelName(trace *openai.RecapExecutionTrace) string {
+	if trace == nil {
+		return m.openAI.GetModelName()
+	}
+
+	if trace.Generation.BackupUsed && trace.Generation.BackupSucceeded {
+		if trace.Generation.BackupUsedModel != "" {
+			return trace.Generation.BackupUsedModel
+		}
+		if trace.Generation.BackupModel != "" {
+			return trace.Generation.BackupModel
+		}
+	} else if trace.Generation.PrimaryUsedModel != "" {
+		return trace.Generation.PrimaryUsedModel
+	}
+
+	return m.openAI.GetModelName()
+}
+
+// messageIDRange returns the smallest and largest message IDs in histories,
+// or zeros when histories is empty.
+func messageIDRange(histories []*ent.ChatHistories) (int64, int64) {
+	if len(histories) == 0 {
+		return 0, 0
+	}
+
+	first, last := histories[0].MessageID, histories[0].MessageID
+	for _, history := range histories[1:] {
+		first = min(first, history.MessageID)
+		last = max(last, history.MessageID)
+	}
+
+	return first, last
 }
 
 func (m *Model) GetOpenAIModelName() string {

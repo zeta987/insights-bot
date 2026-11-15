@@ -81,6 +81,9 @@ var (
 		{Name: "total_token_usage", Type: field.TypeInt, Default: 0},
 		{Name: "recap_type", Type: field.TypeInt, Default: 0},
 		{Name: "model_name", Type: field.TypeString, Default: ""},
+		{Name: "first_message_id", Type: field.TypeInt64, Default: 0},
+		{Name: "last_message_id", Type: field.TypeInt64, Default: 0},
+		{Name: "reused_recap_count", Type: field.TypeInt, Default: 0},
 		{Name: "created_at", Type: field.TypeInt64},
 		{Name: "updated_at", Type: field.TypeInt64},
 	}

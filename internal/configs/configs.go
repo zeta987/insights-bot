@@ -76,6 +76,8 @@ const (
 	EnvSarcasticCondensedModelNameBackup = "SARCASTIC_CONDENSED_MODEL_NAME_backup"
 	// Chat histories summarization language
 	EnvChatHistoriesSummarizationLanguage = "CHAT_HISTORIES_SUMMARIZATION_LANGUAGE"
+	// Manual recaps reuse earlier recaps of the same window unless this is "0" or "false".
+	EnvChatHistoriesRecapReuseEnabled = "CHAT_HISTORIES_RECAP_REUSE_ENABLED"
 
 	// Media understanding: recording media messages and describing them with a model.
 	EnvMediaUnderstandingEnabled         = "MEDIA_UNDERSTANDING_ENABLED"
@@ -156,6 +158,9 @@ type SectionOpenAI struct {
 	ForceCondensedPrimaryFailureForTest bool
 	EnableVerbosePayloadLogs            bool
 	ChatHistoriesSummarizationLanguage  string
+	// ChatHistoriesRecapReuseEnabled lets manual recaps merge earlier recaps
+	// of the same chat instead of summarizing every message again.
+	ChatHistoriesRecapReuseEnabled bool
 }
 
 // SectionMediaUnderstanding controls how media messages enter chat histories.
@@ -192,6 +197,13 @@ type Config struct {
 	SarcasticCondensedSystemPrompt string
 	// Sarcastic condensed user prompt
 	SarcasticCondensedUserPrompt string
+}
+
+// parseEnabledByDefault reads a switch that is on unless set to "0" or "false".
+func parseEnabledByDefault(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+
+	return value != "0" && value != "false"
 }
 
 func parseMediaUnderstanding(getEnv func(string) string) SectionMediaUnderstanding {
@@ -318,6 +330,7 @@ func NewConfig() func() (*Config, error) {
 				ForceCondensedPrimaryFailureForTest: getEnv(EnvOpenAIForceCondensedPrimaryFailureForTest) == "true" || getEnv(EnvOpenAIForceCondensedPrimaryFailureForTest) == "1",
 				EnableVerbosePayloadLogs:            getEnv(EnvOpenAIVerbosePayloadLogs) == "true" || getEnv(EnvOpenAIVerbosePayloadLogs) == "1",
 				ChatHistoriesSummarizationLanguage:  getEnv(EnvChatHistoriesSummarizationLanguage),
+				ChatHistoriesRecapReuseEnabled:      parseEnabledByDefault(getEnv(EnvChatHistoriesRecapReuseEnabled)),
 			},
 			Pinecone: SectionPinecone{
 				ProjectName: getEnv(EnvPineconeProjectName),

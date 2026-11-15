@@ -196,6 +196,69 @@ func (lchru *LogChatHistoriesRecapUpdate) SetNillableModelName(s *string) *LogCh
 	return lchru
 }
 
+// SetFirstMessageID sets the "first_message_id" field.
+func (lchru *LogChatHistoriesRecapUpdate) SetFirstMessageID(i int64) *LogChatHistoriesRecapUpdate {
+	lchru.mutation.ResetFirstMessageID()
+	lchru.mutation.SetFirstMessageID(i)
+	return lchru
+}
+
+// SetNillableFirstMessageID sets the "first_message_id" field if the given value is not nil.
+func (lchru *LogChatHistoriesRecapUpdate) SetNillableFirstMessageID(i *int64) *LogChatHistoriesRecapUpdate {
+	if i != nil {
+		lchru.SetFirstMessageID(*i)
+	}
+	return lchru
+}
+
+// AddFirstMessageID adds i to the "first_message_id" field.
+func (lchru *LogChatHistoriesRecapUpdate) AddFirstMessageID(i int64) *LogChatHistoriesRecapUpdate {
+	lchru.mutation.AddFirstMessageID(i)
+	return lchru
+}
+
+// SetLastMessageID sets the "last_message_id" field.
+func (lchru *LogChatHistoriesRecapUpdate) SetLastMessageID(i int64) *LogChatHistoriesRecapUpdate {
+	lchru.mutation.ResetLastMessageID()
+	lchru.mutation.SetLastMessageID(i)
+	return lchru
+}
+
+// SetNillableLastMessageID sets the "last_message_id" field if the given value is not nil.
+func (lchru *LogChatHistoriesRecapUpdate) SetNillableLastMessageID(i *int64) *LogChatHistoriesRecapUpdate {
+	if i != nil {
+		lchru.SetLastMessageID(*i)
+	}
+	return lchru
+}
+
+// AddLastMessageID adds i to the "last_message_id" field.
+func (lchru *LogChatHistoriesRecapUpdate) AddLastMessageID(i int64) *LogChatHistoriesRecapUpdate {
+	lchru.mutation.AddLastMessageID(i)
+	return lchru
+}
+
+// SetReusedRecapCount sets the "reused_recap_count" field.
+func (lchru *LogChatHistoriesRecapUpdate) SetReusedRecapCount(i int) *LogChatHistoriesRecapUpdate {
+	lchru.mutation.ResetReusedRecapCount()
+	lchru.mutation.SetReusedRecapCount(i)
+	return lchru
+}
+
+// SetNillableReusedRecapCount sets the "reused_recap_count" field if the given value is not nil.
+func (lchru *LogChatHistoriesRecapUpdate) SetNillableReusedRecapCount(i *int) *LogChatHistoriesRecapUpdate {
+	if i != nil {
+		lchru.SetReusedRecapCount(*i)
+	}
+	return lchru
+}
+
+// AddReusedRecapCount adds i to the "reused_recap_count" field.
+func (lchru *LogChatHistoriesRecapUpdate) AddReusedRecapCount(i int) *LogChatHistoriesRecapUpdate {
+	lchru.mutation.AddReusedRecapCount(i)
+	return lchru
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (lchru *LogChatHistoriesRecapUpdate) SetCreatedAt(i int64) *LogChatHistoriesRecapUpdate {
 	lchru.mutation.ResetCreatedAt()
@@ -323,6 +386,24 @@ func (lchru *LogChatHistoriesRecapUpdate) sqlSave(ctx context.Context) (n int, e
 	}
 	if value, ok := lchru.mutation.ModelName(); ok {
 		_spec.SetField(logchathistoriesrecap.FieldModelName, field.TypeString, value)
+	}
+	if value, ok := lchru.mutation.FirstMessageID(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldFirstMessageID, field.TypeInt64, value)
+	}
+	if value, ok := lchru.mutation.AddedFirstMessageID(); ok {
+		_spec.AddField(logchathistoriesrecap.FieldFirstMessageID, field.TypeInt64, value)
+	}
+	if value, ok := lchru.mutation.LastMessageID(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldLastMessageID, field.TypeInt64, value)
+	}
+	if value, ok := lchru.mutation.AddedLastMessageID(); ok {
+		_spec.AddField(logchathistoriesrecap.FieldLastMessageID, field.TypeInt64, value)
+	}
+	if value, ok := lchru.mutation.ReusedRecapCount(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldReusedRecapCount, field.TypeInt, value)
+	}
+	if value, ok := lchru.mutation.AddedReusedRecapCount(); ok {
+		_spec.AddField(logchathistoriesrecap.FieldReusedRecapCount, field.TypeInt, value)
 	}
 	if value, ok := lchru.mutation.CreatedAt(); ok {
 		_spec.SetField(logchathistoriesrecap.FieldCreatedAt, field.TypeInt64, value)
@@ -526,6 +607,69 @@ func (lchruo *LogChatHistoriesRecapUpdateOne) SetNillableModelName(s *string) *L
 	return lchruo
 }
 
+// SetFirstMessageID sets the "first_message_id" field.
+func (lchruo *LogChatHistoriesRecapUpdateOne) SetFirstMessageID(i int64) *LogChatHistoriesRecapUpdateOne {
+	lchruo.mutation.ResetFirstMessageID()
+	lchruo.mutation.SetFirstMessageID(i)
+	return lchruo
+}
+
+// SetNillableFirstMessageID sets the "first_message_id" field if the given value is not nil.
+func (lchruo *LogChatHistoriesRecapUpdateOne) SetNillableFirstMessageID(i *int64) *LogChatHistoriesRecapUpdateOne {
+	if i != nil {
+		lchruo.SetFirstMessageID(*i)
+	}
+	return lchruo
+}
+
+// AddFirstMessageID adds i to the "first_message_id" field.
+func (lchruo *LogChatHistoriesRecapUpdateOne) AddFirstMessageID(i int64) *LogChatHistoriesRecapUpdateOne {
+	lchruo.mutation.AddFirstMessageID(i)
+	return lchruo
+}
+
+// SetLastMessageID sets the "last_message_id" field.
+func (lchruo *LogChatHistoriesRecapUpdateOne) SetLastMessageID(i int64) *LogChatHistoriesRecapUpdateOne {
+	lchruo.mutation.ResetLastMessageID()
+	lchruo.mutation.SetLastMessageID(i)
+	return lchruo
+}
+
+// SetNillableLastMessageID sets the "last_message_id" field if the given value is not nil.
+func (lchruo *LogChatHistoriesRecapUpdateOne) SetNillableLastMessageID(i *int64) *LogChatHistoriesRecapUpdateOne {
+	if i != nil {
+		lchruo.SetLastMessageID(*i)
+	}
+	return lchruo
+}
+
+// AddLastMessageID adds i to the "last_message_id" field.
+func (lchruo *LogChatHistoriesRecapUpdateOne) AddLastMessageID(i int64) *LogChatHistoriesRecapUpdateOne {
+	lchruo.mutation.AddLastMessageID(i)
+	return lchruo
+}
+
+// SetReusedRecapCount sets the "reused_recap_count" field.
+func (lchruo *LogChatHistoriesRecapUpdateOne) SetReusedRecapCount(i int) *LogChatHistoriesRecapUpdateOne {
+	lchruo.mutation.ResetReusedRecapCount()
+	lchruo.mutation.SetReusedRecapCount(i)
+	return lchruo
+}
+
+// SetNillableReusedRecapCount sets the "reused_recap_count" field if the given value is not nil.
+func (lchruo *LogChatHistoriesRecapUpdateOne) SetNillableReusedRecapCount(i *int) *LogChatHistoriesRecapUpdateOne {
+	if i != nil {
+		lchruo.SetReusedRecapCount(*i)
+	}
+	return lchruo
+}
+
+// AddReusedRecapCount adds i to the "reused_recap_count" field.
+func (lchruo *LogChatHistoriesRecapUpdateOne) AddReusedRecapCount(i int) *LogChatHistoriesRecapUpdateOne {
+	lchruo.mutation.AddReusedRecapCount(i)
+	return lchruo
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (lchruo *LogChatHistoriesRecapUpdateOne) SetCreatedAt(i int64) *LogChatHistoriesRecapUpdateOne {
 	lchruo.mutation.ResetCreatedAt()
@@ -683,6 +827,24 @@ func (lchruo *LogChatHistoriesRecapUpdateOne) sqlSave(ctx context.Context) (_nod
 	}
 	if value, ok := lchruo.mutation.ModelName(); ok {
 		_spec.SetField(logchathistoriesrecap.FieldModelName, field.TypeString, value)
+	}
+	if value, ok := lchruo.mutation.FirstMessageID(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldFirstMessageID, field.TypeInt64, value)
+	}
+	if value, ok := lchruo.mutation.AddedFirstMessageID(); ok {
+		_spec.AddField(logchathistoriesrecap.FieldFirstMessageID, field.TypeInt64, value)
+	}
+	if value, ok := lchruo.mutation.LastMessageID(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldLastMessageID, field.TypeInt64, value)
+	}
+	if value, ok := lchruo.mutation.AddedLastMessageID(); ok {
+		_spec.AddField(logchathistoriesrecap.FieldLastMessageID, field.TypeInt64, value)
+	}
+	if value, ok := lchruo.mutation.ReusedRecapCount(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldReusedRecapCount, field.TypeInt, value)
+	}
+	if value, ok := lchruo.mutation.AddedReusedRecapCount(); ok {
+		_spec.AddField(logchathistoriesrecap.FieldReusedRecapCount, field.TypeInt, value)
 	}
 	if value, ok := lchruo.mutation.CreatedAt(); ok {
 		_spec.SetField(logchathistoriesrecap.FieldCreatedAt, field.TypeInt64, value)

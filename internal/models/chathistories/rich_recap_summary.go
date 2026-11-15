@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai"
 )
@@ -21,6 +22,8 @@ type RichRecapSummaryConfig struct {
 	SubscriptionChatTitle string
 	CondensedTrace        *openai.CondensedExecutionTrace
 	RecapTrace            *openai.RecapExecutionTrace
+	// RecapReuse adds a model-info line when earlier recaps were merged.
+	RecapReuse *RecapReuse
 }
 
 func richRecapHeading(title string) string {
@@ -112,10 +115,47 @@ func BuildRichRecapSummary(config RichRecapSummaryConfig) string {
 	if config.GeneralGroupNotice {
 		blocks = append(blocks, "> 💡 一般群組來源暫時不顯示原訊息引用；升級為 supergroup 後即可建立連結。")
 	}
-	blocks = append(blocks,
-		"---",
-		BuildRichRecapModelInfo(config.CondensedTrace, config.RecapTrace),
-	)
+	modelInfo := BuildRichRecapModelInfo(config.CondensedTrace, config.RecapTrace)
+
+	if reuseLine := richRecapReuseLine(config.RecapReuse); reuseLine != "" {
+		modelInfo += "\n" + reuseLine
+	}
+
+	blocks = append(blocks, "---", modelInfo)
 
 	return strings.Join(blocks, "\n\n")
+}
+
+// richRecapReuseLine reports how many earlier recaps were merged, how long
+// ago the newest of them ended, and how many messages were summarized anew.
+func richRecapReuseLine(reuse *RecapReuse) string {
+	if reuse == nil || reuse.ReusedRecaps <= 0 {
+		return ""
+	}
+
+	summarized := "沒有其他訊息需要摘要"
+	if reuse.SummarizedMessages > 0 {
+		summarized = fmt.Sprintf("另摘要 %d 則訊息", reuse.SummarizedMessages)
+	}
+
+	return fmt.Sprintf("> - 沿用回顧：%d 份（最近一份涵蓋到%s），%s",
+		reuse.ReusedRecaps,
+		formatRecapReuseAge(reuse.LastReusedMessageAge),
+		summarized,
+	)
+}
+
+func formatRecapReuseAge(age time.Duration) string {
+	minutes := int(age / time.Minute)
+
+	switch {
+	case minutes < 1:
+		return "剛剛"
+	case minutes < 60:
+		return fmt.Sprintf(" %d 分鐘前", minutes)
+	case minutes%60 == 0:
+		return fmt.Sprintf(" %d 小時前", minutes/60)
+	default:
+		return fmt.Sprintf(" %d 小時 %d 分前", minutes/60, minutes%60)
+	}
 }

@@ -698,12 +698,13 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 
 	chatType := telegram.ChatType(histories[len(histories)-1].ChatType)
 
-	logID, summarizations, recapTrace, err := h.chatHistories.SummarizeChatHistories(data.ChatID, chatType, histories)
+	recapResult, err := h.chatHistories.SummarizeChatHistoriesReusingRecaps(data.ChatID, chatType, histories)
 	if err != nil {
 		return nil, tgbot.NewExceptionError(err).WithMessage("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
 	}
 
-	summarizations = lo.Filter(summarizations, func(item string, _ int) bool { return item != "" })
+	logID, recapTrace := recapResult.LogID, recapResult.Trace
+	summarizations := lo.Filter(recapResult.Summaries, func(item string, _ int) bool { return item != "" })
 	if len(summarizations) == 0 {
 		return nil, tgbot.NewMessageError("聊天記錄回顧生成失敗，請稍後再試！").WithReply(replyToMessage)
 	}
@@ -727,7 +728,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 	if groupName == "" {
 		groupName = "當前聊天"
 	}
-	condensedSummary, condensedTrace, genErr := h.chatHistories.GenSarcasticCondensed(data.ChatID, histories)
+	condensedSummary, condensedTrace, genErr := h.chatHistories.GenRecapCondensed(data.ChatID, histories, recapResult)
 	condensedSummary = strings.TrimSpace(condensedSummary)
 	if genErr != nil || condensedSummary == "" {
 		condensedSummary = chathistories.FallbackCondensedSummary(summarizations, fmt.Sprintf("過去 %d 小時的群組聊天回顧", data.Hour))
@@ -742,6 +743,7 @@ func (h *CallbackQueryHandler) handleCallbackQuerySelectHours(c *tgbot.Context) 
 		GeneralGroupNotice: chatType == telegram.ChatTypeGroup,
 		CondensedTrace:     condensedTrace,
 		RecapTrace:         recapTrace,
+		RecapReuse:         recapResult.Reuse,
 	})
 
 	parts := chathistories.ComposeRichRecapMessages(visibleSummary, summarizations)

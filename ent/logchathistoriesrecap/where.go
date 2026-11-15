@@ -98,6 +98,21 @@ func ModelName(v string) predicate.LogChatHistoriesRecap {
 	return predicate.LogChatHistoriesRecap(sql.FieldEQ(FieldModelName, v))
 }
 
+// FirstMessageID applies equality check predicate on the "first_message_id" field. It's identical to FirstMessageIDEQ.
+func FirstMessageID(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldEQ(FieldFirstMessageID, v))
+}
+
+// LastMessageID applies equality check predicate on the "last_message_id" field. It's identical to LastMessageIDEQ.
+func LastMessageID(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldEQ(FieldLastMessageID, v))
+}
+
+// ReusedRecapCount applies equality check predicate on the "reused_recap_count" field. It's identical to ReusedRecapCountEQ.
+func ReusedRecapCount(v int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldEQ(FieldReusedRecapCount, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v int64) predicate.LogChatHistoriesRecap {
 	return predicate.LogChatHistoriesRecap(sql.FieldEQ(FieldCreatedAt, v))
@@ -541,6 +556,126 @@ func ModelNameEqualFold(v string) predicate.LogChatHistoriesRecap {
 // ModelNameContainsFold applies the ContainsFold predicate on the "model_name" field.
 func ModelNameContainsFold(v string) predicate.LogChatHistoriesRecap {
 	return predicate.LogChatHistoriesRecap(sql.FieldContainsFold(FieldModelName, v))
+}
+
+// FirstMessageIDEQ applies the EQ predicate on the "first_message_id" field.
+func FirstMessageIDEQ(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldEQ(FieldFirstMessageID, v))
+}
+
+// FirstMessageIDNEQ applies the NEQ predicate on the "first_message_id" field.
+func FirstMessageIDNEQ(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldNEQ(FieldFirstMessageID, v))
+}
+
+// FirstMessageIDIn applies the In predicate on the "first_message_id" field.
+func FirstMessageIDIn(vs ...int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldIn(FieldFirstMessageID, vs...))
+}
+
+// FirstMessageIDNotIn applies the NotIn predicate on the "first_message_id" field.
+func FirstMessageIDNotIn(vs ...int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldNotIn(FieldFirstMessageID, vs...))
+}
+
+// FirstMessageIDGT applies the GT predicate on the "first_message_id" field.
+func FirstMessageIDGT(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldGT(FieldFirstMessageID, v))
+}
+
+// FirstMessageIDGTE applies the GTE predicate on the "first_message_id" field.
+func FirstMessageIDGTE(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldGTE(FieldFirstMessageID, v))
+}
+
+// FirstMessageIDLT applies the LT predicate on the "first_message_id" field.
+func FirstMessageIDLT(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldLT(FieldFirstMessageID, v))
+}
+
+// FirstMessageIDLTE applies the LTE predicate on the "first_message_id" field.
+func FirstMessageIDLTE(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldLTE(FieldFirstMessageID, v))
+}
+
+// LastMessageIDEQ applies the EQ predicate on the "last_message_id" field.
+func LastMessageIDEQ(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldEQ(FieldLastMessageID, v))
+}
+
+// LastMessageIDNEQ applies the NEQ predicate on the "last_message_id" field.
+func LastMessageIDNEQ(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldNEQ(FieldLastMessageID, v))
+}
+
+// LastMessageIDIn applies the In predicate on the "last_message_id" field.
+func LastMessageIDIn(vs ...int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldIn(FieldLastMessageID, vs...))
+}
+
+// LastMessageIDNotIn applies the NotIn predicate on the "last_message_id" field.
+func LastMessageIDNotIn(vs ...int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldNotIn(FieldLastMessageID, vs...))
+}
+
+// LastMessageIDGT applies the GT predicate on the "last_message_id" field.
+func LastMessageIDGT(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldGT(FieldLastMessageID, v))
+}
+
+// LastMessageIDGTE applies the GTE predicate on the "last_message_id" field.
+func LastMessageIDGTE(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldGTE(FieldLastMessageID, v))
+}
+
+// LastMessageIDLT applies the LT predicate on the "last_message_id" field.
+func LastMessageIDLT(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldLT(FieldLastMessageID, v))
+}
+
+// LastMessageIDLTE applies the LTE predicate on the "last_message_id" field.
+func LastMessageIDLTE(v int64) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldLTE(FieldLastMessageID, v))
+}
+
+// ReusedRecapCountEQ applies the EQ predicate on the "reused_recap_count" field.
+func ReusedRecapCountEQ(v int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldEQ(FieldReusedRecapCount, v))
+}
+
+// ReusedRecapCountNEQ applies the NEQ predicate on the "reused_recap_count" field.
+func ReusedRecapCountNEQ(v int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldNEQ(FieldReusedRecapCount, v))
+}
+
+// ReusedRecapCountIn applies the In predicate on the "reused_recap_count" field.
+func ReusedRecapCountIn(vs ...int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldIn(FieldReusedRecapCount, vs...))
+}
+
+// ReusedRecapCountNotIn applies the NotIn predicate on the "reused_recap_count" field.
+func ReusedRecapCountNotIn(vs ...int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldNotIn(FieldReusedRecapCount, vs...))
+}
+
+// ReusedRecapCountGT applies the GT predicate on the "reused_recap_count" field.
+func ReusedRecapCountGT(v int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldGT(FieldReusedRecapCount, v))
+}
+
+// ReusedRecapCountGTE applies the GTE predicate on the "reused_recap_count" field.
+func ReusedRecapCountGTE(v int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldGTE(FieldReusedRecapCount, v))
+}
+
+// ReusedRecapCountLT applies the LT predicate on the "reused_recap_count" field.
+func ReusedRecapCountLT(v int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldLT(FieldReusedRecapCount, v))
+}
+
+// ReusedRecapCountLTE applies the LTE predicate on the "reused_recap_count" field.
+func ReusedRecapCountLTE(v int) predicate.LogChatHistoriesRecap {
+	return predicate.LogChatHistoriesRecap(sql.FieldLTE(FieldReusedRecapCount, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

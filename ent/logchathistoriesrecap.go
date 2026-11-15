@@ -35,6 +35,12 @@ type LogChatHistoriesRecap struct {
 	RecapType int `json:"recap_type,omitempty"`
 	// ModelName holds the value of the "model_name" field.
 	ModelName string `json:"model_name,omitempty"`
+	// FirstMessageID holds the value of the "first_message_id" field.
+	FirstMessageID int64 `json:"first_message_id,omitempty"`
+	// LastMessageID holds the value of the "last_message_id" field.
+	LastMessageID int64 `json:"last_message_id,omitempty"`
+	// ReusedRecapCount holds the value of the "reused_recap_count" field.
+	ReusedRecapCount int `json:"reused_recap_count,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt int64 `json:"created_at,omitempty"`
 	// UpdatedAt holds the value of the "updated_at" field.
@@ -47,7 +53,7 @@ func (*LogChatHistoriesRecap) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case logchathistoriesrecap.FieldChatID, logchathistoriesrecap.FieldFromPlatform, logchathistoriesrecap.FieldPromptTokenUsage, logchathistoriesrecap.FieldCompletionTokenUsage, logchathistoriesrecap.FieldTotalTokenUsage, logchathistoriesrecap.FieldRecapType, logchathistoriesrecap.FieldCreatedAt, logchathistoriesrecap.FieldUpdatedAt:
+		case logchathistoriesrecap.FieldChatID, logchathistoriesrecap.FieldFromPlatform, logchathistoriesrecap.FieldPromptTokenUsage, logchathistoriesrecap.FieldCompletionTokenUsage, logchathistoriesrecap.FieldTotalTokenUsage, logchathistoriesrecap.FieldRecapType, logchathistoriesrecap.FieldFirstMessageID, logchathistoriesrecap.FieldLastMessageID, logchathistoriesrecap.FieldReusedRecapCount, logchathistoriesrecap.FieldCreatedAt, logchathistoriesrecap.FieldUpdatedAt:
 			values[i] = new(sql.NullInt64)
 		case logchathistoriesrecap.FieldRecapInputs, logchathistoriesrecap.FieldRecapOutputs, logchathistoriesrecap.FieldModelName:
 			values[i] = new(sql.NullString)
@@ -128,6 +134,24 @@ func (lchr *LogChatHistoriesRecap) assignValues(columns []string, values []any) 
 			} else if value.Valid {
 				lchr.ModelName = value.String
 			}
+		case logchathistoriesrecap.FieldFirstMessageID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field first_message_id", values[i])
+			} else if value.Valid {
+				lchr.FirstMessageID = value.Int64
+			}
+		case logchathistoriesrecap.FieldLastMessageID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field last_message_id", values[i])
+			} else if value.Valid {
+				lchr.LastMessageID = value.Int64
+			}
+		case logchathistoriesrecap.FieldReusedRecapCount:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field reused_recap_count", values[i])
+			} else if value.Valid {
+				lchr.ReusedRecapCount = int(value.Int64)
+			}
 		case logchathistoriesrecap.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
 				return fmt.Errorf("unexpected type %T for field created_at", values[i])
@@ -202,6 +226,15 @@ func (lchr *LogChatHistoriesRecap) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("model_name=")
 	builder.WriteString(lchr.ModelName)
+	builder.WriteString(", ")
+	builder.WriteString("first_message_id=")
+	builder.WriteString(fmt.Sprintf("%v", lchr.FirstMessageID))
+	builder.WriteString(", ")
+	builder.WriteString("last_message_id=")
+	builder.WriteString(fmt.Sprintf("%v", lchr.LastMessageID))
+	builder.WriteString(", ")
+	builder.WriteString("reused_recap_count=")
+	builder.WriteString(fmt.Sprintf("%v", lchr.ReusedRecapCount))
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(fmt.Sprintf("%v", lchr.CreatedAt))

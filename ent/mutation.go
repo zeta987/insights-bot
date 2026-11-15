@@ -3148,6 +3148,12 @@ type LogChatHistoriesRecapMutation struct {
 	recap_type                *int
 	addrecap_type             *int
 	model_name                *string
+	first_message_id          *int64
+	addfirst_message_id       *int64
+	last_message_id           *int64
+	addlast_message_id        *int64
+	reused_recap_count        *int
+	addreused_recap_count     *int
 	created_at                *int64
 	addcreated_at             *int64
 	updated_at                *int64
@@ -3706,6 +3712,174 @@ func (m *LogChatHistoriesRecapMutation) ResetModelName() {
 	m.model_name = nil
 }
 
+// SetFirstMessageID sets the "first_message_id" field.
+func (m *LogChatHistoriesRecapMutation) SetFirstMessageID(i int64) {
+	m.first_message_id = &i
+	m.addfirst_message_id = nil
+}
+
+// FirstMessageID returns the value of the "first_message_id" field in the mutation.
+func (m *LogChatHistoriesRecapMutation) FirstMessageID() (r int64, exists bool) {
+	v := m.first_message_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFirstMessageID returns the old "first_message_id" field's value of the LogChatHistoriesRecap entity.
+// If the LogChatHistoriesRecap object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *LogChatHistoriesRecapMutation) OldFirstMessageID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFirstMessageID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFirstMessageID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFirstMessageID: %w", err)
+	}
+	return oldValue.FirstMessageID, nil
+}
+
+// AddFirstMessageID adds i to the "first_message_id" field.
+func (m *LogChatHistoriesRecapMutation) AddFirstMessageID(i int64) {
+	if m.addfirst_message_id != nil {
+		*m.addfirst_message_id += i
+	} else {
+		m.addfirst_message_id = &i
+	}
+}
+
+// AddedFirstMessageID returns the value that was added to the "first_message_id" field in this mutation.
+func (m *LogChatHistoriesRecapMutation) AddedFirstMessageID() (r int64, exists bool) {
+	v := m.addfirst_message_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetFirstMessageID resets all changes to the "first_message_id" field.
+func (m *LogChatHistoriesRecapMutation) ResetFirstMessageID() {
+	m.first_message_id = nil
+	m.addfirst_message_id = nil
+}
+
+// SetLastMessageID sets the "last_message_id" field.
+func (m *LogChatHistoriesRecapMutation) SetLastMessageID(i int64) {
+	m.last_message_id = &i
+	m.addlast_message_id = nil
+}
+
+// LastMessageID returns the value of the "last_message_id" field in the mutation.
+func (m *LogChatHistoriesRecapMutation) LastMessageID() (r int64, exists bool) {
+	v := m.last_message_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastMessageID returns the old "last_message_id" field's value of the LogChatHistoriesRecap entity.
+// If the LogChatHistoriesRecap object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *LogChatHistoriesRecapMutation) OldLastMessageID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastMessageID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastMessageID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastMessageID: %w", err)
+	}
+	return oldValue.LastMessageID, nil
+}
+
+// AddLastMessageID adds i to the "last_message_id" field.
+func (m *LogChatHistoriesRecapMutation) AddLastMessageID(i int64) {
+	if m.addlast_message_id != nil {
+		*m.addlast_message_id += i
+	} else {
+		m.addlast_message_id = &i
+	}
+}
+
+// AddedLastMessageID returns the value that was added to the "last_message_id" field in this mutation.
+func (m *LogChatHistoriesRecapMutation) AddedLastMessageID() (r int64, exists bool) {
+	v := m.addlast_message_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetLastMessageID resets all changes to the "last_message_id" field.
+func (m *LogChatHistoriesRecapMutation) ResetLastMessageID() {
+	m.last_message_id = nil
+	m.addlast_message_id = nil
+}
+
+// SetReusedRecapCount sets the "reused_recap_count" field.
+func (m *LogChatHistoriesRecapMutation) SetReusedRecapCount(i int) {
+	m.reused_recap_count = &i
+	m.addreused_recap_count = nil
+}
+
+// ReusedRecapCount returns the value of the "reused_recap_count" field in the mutation.
+func (m *LogChatHistoriesRecapMutation) ReusedRecapCount() (r int, exists bool) {
+	v := m.reused_recap_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReusedRecapCount returns the old "reused_recap_count" field's value of the LogChatHistoriesRecap entity.
+// If the LogChatHistoriesRecap object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *LogChatHistoriesRecapMutation) OldReusedRecapCount(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReusedRecapCount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReusedRecapCount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReusedRecapCount: %w", err)
+	}
+	return oldValue.ReusedRecapCount, nil
+}
+
+// AddReusedRecapCount adds i to the "reused_recap_count" field.
+func (m *LogChatHistoriesRecapMutation) AddReusedRecapCount(i int) {
+	if m.addreused_recap_count != nil {
+		*m.addreused_recap_count += i
+	} else {
+		m.addreused_recap_count = &i
+	}
+}
+
+// AddedReusedRecapCount returns the value that was added to the "reused_recap_count" field in this mutation.
+func (m *LogChatHistoriesRecapMutation) AddedReusedRecapCount() (r int, exists bool) {
+	v := m.addreused_recap_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetReusedRecapCount resets all changes to the "reused_recap_count" field.
+func (m *LogChatHistoriesRecapMutation) ResetReusedRecapCount() {
+	m.reused_recap_count = nil
+	m.addreused_recap_count = nil
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *LogChatHistoriesRecapMutation) SetCreatedAt(i int64) {
 	m.created_at = &i
@@ -3852,7 +4026,7 @@ func (m *LogChatHistoriesRecapMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *LogChatHistoriesRecapMutation) Fields() []string {
-	fields := make([]string, 0, 11)
+	fields := make([]string, 0, 14)
 	if m.chat_id != nil {
 		fields = append(fields, logchathistoriesrecap.FieldChatID)
 	}
@@ -3879,6 +4053,15 @@ func (m *LogChatHistoriesRecapMutation) Fields() []string {
 	}
 	if m.model_name != nil {
 		fields = append(fields, logchathistoriesrecap.FieldModelName)
+	}
+	if m.first_message_id != nil {
+		fields = append(fields, logchathistoriesrecap.FieldFirstMessageID)
+	}
+	if m.last_message_id != nil {
+		fields = append(fields, logchathistoriesrecap.FieldLastMessageID)
+	}
+	if m.reused_recap_count != nil {
+		fields = append(fields, logchathistoriesrecap.FieldReusedRecapCount)
 	}
 	if m.created_at != nil {
 		fields = append(fields, logchathistoriesrecap.FieldCreatedAt)
@@ -3912,6 +4095,12 @@ func (m *LogChatHistoriesRecapMutation) Field(name string) (ent.Value, bool) {
 		return m.RecapType()
 	case logchathistoriesrecap.FieldModelName:
 		return m.ModelName()
+	case logchathistoriesrecap.FieldFirstMessageID:
+		return m.FirstMessageID()
+	case logchathistoriesrecap.FieldLastMessageID:
+		return m.LastMessageID()
+	case logchathistoriesrecap.FieldReusedRecapCount:
+		return m.ReusedRecapCount()
 	case logchathistoriesrecap.FieldCreatedAt:
 		return m.CreatedAt()
 	case logchathistoriesrecap.FieldUpdatedAt:
@@ -3943,6 +4132,12 @@ func (m *LogChatHistoriesRecapMutation) OldField(ctx context.Context, name strin
 		return m.OldRecapType(ctx)
 	case logchathistoriesrecap.FieldModelName:
 		return m.OldModelName(ctx)
+	case logchathistoriesrecap.FieldFirstMessageID:
+		return m.OldFirstMessageID(ctx)
+	case logchathistoriesrecap.FieldLastMessageID:
+		return m.OldLastMessageID(ctx)
+	case logchathistoriesrecap.FieldReusedRecapCount:
+		return m.OldReusedRecapCount(ctx)
 	case logchathistoriesrecap.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	case logchathistoriesrecap.FieldUpdatedAt:
@@ -4019,6 +4214,27 @@ func (m *LogChatHistoriesRecapMutation) SetField(name string, value ent.Value) e
 		}
 		m.SetModelName(v)
 		return nil
+	case logchathistoriesrecap.FieldFirstMessageID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFirstMessageID(v)
+		return nil
+	case logchathistoriesrecap.FieldLastMessageID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastMessageID(v)
+		return nil
+	case logchathistoriesrecap.FieldReusedRecapCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReusedRecapCount(v)
+		return nil
 	case logchathistoriesrecap.FieldCreatedAt:
 		v, ok := value.(int64)
 		if !ok {
@@ -4059,6 +4275,15 @@ func (m *LogChatHistoriesRecapMutation) AddedFields() []string {
 	if m.addrecap_type != nil {
 		fields = append(fields, logchathistoriesrecap.FieldRecapType)
 	}
+	if m.addfirst_message_id != nil {
+		fields = append(fields, logchathistoriesrecap.FieldFirstMessageID)
+	}
+	if m.addlast_message_id != nil {
+		fields = append(fields, logchathistoriesrecap.FieldLastMessageID)
+	}
+	if m.addreused_recap_count != nil {
+		fields = append(fields, logchathistoriesrecap.FieldReusedRecapCount)
+	}
 	if m.addcreated_at != nil {
 		fields = append(fields, logchathistoriesrecap.FieldCreatedAt)
 	}
@@ -4085,6 +4310,12 @@ func (m *LogChatHistoriesRecapMutation) AddedField(name string) (ent.Value, bool
 		return m.AddedTotalTokenUsage()
 	case logchathistoriesrecap.FieldRecapType:
 		return m.AddedRecapType()
+	case logchathistoriesrecap.FieldFirstMessageID:
+		return m.AddedFirstMessageID()
+	case logchathistoriesrecap.FieldLastMessageID:
+		return m.AddedLastMessageID()
+	case logchathistoriesrecap.FieldReusedRecapCount:
+		return m.AddedReusedRecapCount()
 	case logchathistoriesrecap.FieldCreatedAt:
 		return m.AddedCreatedAt()
 	case logchathistoriesrecap.FieldUpdatedAt:
@@ -4139,6 +4370,27 @@ func (m *LogChatHistoriesRecapMutation) AddField(name string, value ent.Value) e
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRecapType(v)
+		return nil
+	case logchathistoriesrecap.FieldFirstMessageID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddFirstMessageID(v)
+		return nil
+	case logchathistoriesrecap.FieldLastMessageID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddLastMessageID(v)
+		return nil
+	case logchathistoriesrecap.FieldReusedRecapCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddReusedRecapCount(v)
 		return nil
 	case logchathistoriesrecap.FieldCreatedAt:
 		v, ok := value.(int64)
@@ -4207,6 +4459,15 @@ func (m *LogChatHistoriesRecapMutation) ResetField(name string) error {
 		return nil
 	case logchathistoriesrecap.FieldModelName:
 		m.ResetModelName()
+		return nil
+	case logchathistoriesrecap.FieldFirstMessageID:
+		m.ResetFirstMessageID()
+		return nil
+	case logchathistoriesrecap.FieldLastMessageID:
+		m.ResetLastMessageID()
+		return nil
+	case logchathistoriesrecap.FieldReusedRecapCount:
+		m.ResetReusedRecapCount()
 		return nil
 	case logchathistoriesrecap.FieldCreatedAt:
 		m.ResetCreatedAt()

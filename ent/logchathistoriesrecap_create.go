@@ -146,6 +146,48 @@ func (lchrc *LogChatHistoriesRecapCreate) SetNillableModelName(s *string) *LogCh
 	return lchrc
 }
 
+// SetFirstMessageID sets the "first_message_id" field.
+func (lchrc *LogChatHistoriesRecapCreate) SetFirstMessageID(i int64) *LogChatHistoriesRecapCreate {
+	lchrc.mutation.SetFirstMessageID(i)
+	return lchrc
+}
+
+// SetNillableFirstMessageID sets the "first_message_id" field if the given value is not nil.
+func (lchrc *LogChatHistoriesRecapCreate) SetNillableFirstMessageID(i *int64) *LogChatHistoriesRecapCreate {
+	if i != nil {
+		lchrc.SetFirstMessageID(*i)
+	}
+	return lchrc
+}
+
+// SetLastMessageID sets the "last_message_id" field.
+func (lchrc *LogChatHistoriesRecapCreate) SetLastMessageID(i int64) *LogChatHistoriesRecapCreate {
+	lchrc.mutation.SetLastMessageID(i)
+	return lchrc
+}
+
+// SetNillableLastMessageID sets the "last_message_id" field if the given value is not nil.
+func (lchrc *LogChatHistoriesRecapCreate) SetNillableLastMessageID(i *int64) *LogChatHistoriesRecapCreate {
+	if i != nil {
+		lchrc.SetLastMessageID(*i)
+	}
+	return lchrc
+}
+
+// SetReusedRecapCount sets the "reused_recap_count" field.
+func (lchrc *LogChatHistoriesRecapCreate) SetReusedRecapCount(i int) *LogChatHistoriesRecapCreate {
+	lchrc.mutation.SetReusedRecapCount(i)
+	return lchrc
+}
+
+// SetNillableReusedRecapCount sets the "reused_recap_count" field if the given value is not nil.
+func (lchrc *LogChatHistoriesRecapCreate) SetNillableReusedRecapCount(i *int) *LogChatHistoriesRecapCreate {
+	if i != nil {
+		lchrc.SetReusedRecapCount(*i)
+	}
+	return lchrc
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (lchrc *LogChatHistoriesRecapCreate) SetCreatedAt(i int64) *LogChatHistoriesRecapCreate {
 	lchrc.mutation.SetCreatedAt(i)
@@ -259,6 +301,18 @@ func (lchrc *LogChatHistoriesRecapCreate) defaults() {
 		v := logchathistoriesrecap.DefaultModelName
 		lchrc.mutation.SetModelName(v)
 	}
+	if _, ok := lchrc.mutation.FirstMessageID(); !ok {
+		v := logchathistoriesrecap.DefaultFirstMessageID
+		lchrc.mutation.SetFirstMessageID(v)
+	}
+	if _, ok := lchrc.mutation.LastMessageID(); !ok {
+		v := logchathistoriesrecap.DefaultLastMessageID
+		lchrc.mutation.SetLastMessageID(v)
+	}
+	if _, ok := lchrc.mutation.ReusedRecapCount(); !ok {
+		v := logchathistoriesrecap.DefaultReusedRecapCount
+		lchrc.mutation.SetReusedRecapCount(v)
+	}
 	if _, ok := lchrc.mutation.CreatedAt(); !ok {
 		v := logchathistoriesrecap.DefaultCreatedAt()
 		lchrc.mutation.SetCreatedAt(v)
@@ -301,6 +355,15 @@ func (lchrc *LogChatHistoriesRecapCreate) check() error {
 	}
 	if _, ok := lchrc.mutation.ModelName(); !ok {
 		return &ValidationError{Name: "model_name", err: errors.New(`ent: missing required field "LogChatHistoriesRecap.model_name"`)}
+	}
+	if _, ok := lchrc.mutation.FirstMessageID(); !ok {
+		return &ValidationError{Name: "first_message_id", err: errors.New(`ent: missing required field "LogChatHistoriesRecap.first_message_id"`)}
+	}
+	if _, ok := lchrc.mutation.LastMessageID(); !ok {
+		return &ValidationError{Name: "last_message_id", err: errors.New(`ent: missing required field "LogChatHistoriesRecap.last_message_id"`)}
+	}
+	if _, ok := lchrc.mutation.ReusedRecapCount(); !ok {
+		return &ValidationError{Name: "reused_recap_count", err: errors.New(`ent: missing required field "LogChatHistoriesRecap.reused_recap_count"`)}
 	}
 	if _, ok := lchrc.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "LogChatHistoriesRecap.created_at"`)}
@@ -379,6 +442,18 @@ func (lchrc *LogChatHistoriesRecapCreate) createSpec() (*LogChatHistoriesRecap, 
 	if value, ok := lchrc.mutation.ModelName(); ok {
 		_spec.SetField(logchathistoriesrecap.FieldModelName, field.TypeString, value)
 		_node.ModelName = value
+	}
+	if value, ok := lchrc.mutation.FirstMessageID(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldFirstMessageID, field.TypeInt64, value)
+		_node.FirstMessageID = value
+	}
+	if value, ok := lchrc.mutation.LastMessageID(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldLastMessageID, field.TypeInt64, value)
+		_node.LastMessageID = value
+	}
+	if value, ok := lchrc.mutation.ReusedRecapCount(); ok {
+		_spec.SetField(logchathistoriesrecap.FieldReusedRecapCount, field.TypeInt, value)
+		_node.ReusedRecapCount = value
 	}
 	if value, ok := lchrc.mutation.CreatedAt(); ok {
 		_spec.SetField(logchathistoriesrecap.FieldCreatedAt, field.TypeInt64, value)

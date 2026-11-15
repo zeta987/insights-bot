@@ -30,6 +30,12 @@ const (
 	FieldRecapType = "recap_type"
 	// FieldModelName holds the string denoting the model_name field in the database.
 	FieldModelName = "model_name"
+	// FieldFirstMessageID holds the string denoting the first_message_id field in the database.
+	FieldFirstMessageID = "first_message_id"
+	// FieldLastMessageID holds the string denoting the last_message_id field in the database.
+	FieldLastMessageID = "last_message_id"
+	// FieldReusedRecapCount holds the string denoting the reused_recap_count field in the database.
+	FieldReusedRecapCount = "reused_recap_count"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// FieldUpdatedAt holds the string denoting the updated_at field in the database.
@@ -50,6 +56,9 @@ var Columns = []string{
 	FieldTotalTokenUsage,
 	FieldRecapType,
 	FieldModelName,
+	FieldFirstMessageID,
+	FieldLastMessageID,
+	FieldReusedRecapCount,
 	FieldCreatedAt,
 	FieldUpdatedAt,
 }
@@ -83,6 +92,12 @@ var (
 	DefaultRecapType int
 	// DefaultModelName holds the default value on creation for the "model_name" field.
 	DefaultModelName string
+	// DefaultFirstMessageID holds the default value on creation for the "first_message_id" field.
+	DefaultFirstMessageID int64
+	// DefaultLastMessageID holds the default value on creation for the "last_message_id" field.
+	DefaultLastMessageID int64
+	// DefaultReusedRecapCount holds the default value on creation for the "reused_recap_count" field.
+	DefaultReusedRecapCount int
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() int64
 	// DefaultUpdatedAt holds the default value on creation for the "updated_at" field.
@@ -142,6 +157,21 @@ func ByRecapType(opts ...sql.OrderTermOption) OrderOption {
 // ByModelName orders the results by the model_name field.
 func ByModelName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldModelName, opts...).ToFunc()
+}
+
+// ByFirstMessageID orders the results by the first_message_id field.
+func ByFirstMessageID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFirstMessageID, opts...).ToFunc()
+}
+
+// ByLastMessageID orders the results by the last_message_id field.
+func ByLastMessageID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLastMessageID, opts...).ToFunc()
+}
+
+// ByReusedRecapCount orders the results by the reused_recap_count field.
+func ByReusedRecapCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldReusedRecapCount, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.

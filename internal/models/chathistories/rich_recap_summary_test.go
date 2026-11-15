@@ -3,6 +3,7 @@ package chathistories
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/nekomeowww/insights-bot/internal/thirdparty/openai"
@@ -99,4 +100,20 @@ func TestFallbackCondensedSummaryTruncatesLongTextAtNaturalBreak(t *testing.T) {
 
 	require.Equal(t, first, result)
 	require.LessOrEqual(t, utf8.RuneCountInString(result), 120)
+}
+
+func TestBuildRichRecapSummaryReportsReusedRecaps(t *testing.T) {
+	config := RichRecapSummaryConfig{Title: "測試群", Hours: 6, InitiatorName: "Zeta", CondensedSummary: "概覽"}
+	require.NotContains(t, BuildRichRecapSummary(config), "沿用回顧")
+
+	config.RecapReuse = &RecapReuse{ReusedRecaps: 3, SummarizedMessages: 42, LastReusedMessageAge: 2*time.Hour + 15*time.Minute + 20*time.Second}
+	summary := BuildRichRecapSummary(config)
+	require.True(t, strings.HasSuffix(summary, "> - 校對模型：資訊不可用\n> - 沿用回顧：3 份（最近一份涵蓋到 2 小時 15 分前），另摘要 42 則訊息"), summary)
+}
+
+func TestRichRecapReuseLineFormatsAge(t *testing.T) {
+	require.Equal(t, "> - 沿用回顧：1 份（最近一份涵蓋到剛剛），沒有其他訊息需要摘要", richRecapReuseLine(&RecapReuse{ReusedRecaps: 1, LastReusedMessageAge: 30 * time.Second}))
+	require.Equal(t, "> - 沿用回顧：2 份（最近一份涵蓋到 5 分鐘前），另摘要 7 則訊息", richRecapReuseLine(&RecapReuse{ReusedRecaps: 2, SummarizedMessages: 7, LastReusedMessageAge: 5 * time.Minute}))
+	require.Equal(t, "> - 沿用回顧：2 份（最近一份涵蓋到 3 小時前），另摘要 7 則訊息", richRecapReuseLine(&RecapReuse{ReusedRecaps: 2, SummarizedMessages: 7, LastReusedMessageAge: 3 * time.Hour}))
+	require.Empty(t, richRecapReuseLine(&RecapReuse{}))
 }

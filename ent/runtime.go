@@ -195,12 +195,24 @@ func init() {
 	logchathistoriesrecapDescModelName := logchathistoriesrecapFields[9].Descriptor()
 	// logchathistoriesrecap.DefaultModelName holds the default value on creation for the model_name field.
 	logchathistoriesrecap.DefaultModelName = logchathistoriesrecapDescModelName.Default.(string)
+	// logchathistoriesrecapDescFirstMessageID is the schema descriptor for first_message_id field.
+	logchathistoriesrecapDescFirstMessageID := logchathistoriesrecapFields[10].Descriptor()
+	// logchathistoriesrecap.DefaultFirstMessageID holds the default value on creation for the first_message_id field.
+	logchathistoriesrecap.DefaultFirstMessageID = logchathistoriesrecapDescFirstMessageID.Default.(int64)
+	// logchathistoriesrecapDescLastMessageID is the schema descriptor for last_message_id field.
+	logchathistoriesrecapDescLastMessageID := logchathistoriesrecapFields[11].Descriptor()
+	// logchathistoriesrecap.DefaultLastMessageID holds the default value on creation for the last_message_id field.
+	logchathistoriesrecap.DefaultLastMessageID = logchathistoriesrecapDescLastMessageID.Default.(int64)
+	// logchathistoriesrecapDescReusedRecapCount is the schema descriptor for reused_recap_count field.
+	logchathistoriesrecapDescReusedRecapCount := logchathistoriesrecapFields[12].Descriptor()
+	// logchathistoriesrecap.DefaultReusedRecapCount holds the default value on creation for the reused_recap_count field.
+	logchathistoriesrecap.DefaultReusedRecapCount = logchathistoriesrecapDescReusedRecapCount.Default.(int)
 	// logchathistoriesrecapDescCreatedAt is the schema descriptor for created_at field.
-	logchathistoriesrecapDescCreatedAt := logchathistoriesrecapFields[10].Descriptor()
+	logchathistoriesrecapDescCreatedAt := logchathistoriesrecapFields[13].Descriptor()
 	// logchathistoriesrecap.DefaultCreatedAt holds the default value on creation for the created_at field.
 	logchathistoriesrecap.DefaultCreatedAt = logchathistoriesrecapDescCreatedAt.Default.(func() int64)
 	// logchathistoriesrecapDescUpdatedAt is the schema descriptor for updated_at field.
-	logchathistoriesrecapDescUpdatedAt := logchathistoriesrecapFields[11].Descriptor()
+	logchathistoriesrecapDescUpdatedAt := logchathistoriesrecapFields[14].Descriptor()
 	// logchathistoriesrecap.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	logchathistoriesrecap.DefaultUpdatedAt = logchathistoriesrecapDescUpdatedAt.Default.(func() int64)
 	// logchathistoriesrecapDescID is the schema descriptor for id field.
