@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
@@ -257,13 +258,21 @@ func (c *OpenAIClient) finishMediaReview(request MediaReviewRequest, description
 		normalized = ""
 	}
 
-	c.logInfo("check model reviewed media description",
+	fields := []zap.Field{
 		zap.String("kind", string(request.Kind)),
 		zap.String("check_model", c.checkModelName),
-		zap.String("draft", request.Draft),
-		zap.String("reviewed", normalized),
+		zap.Bool("changed", normalized != request.Draft),
+		zap.Int("draft_runes", utf8.RuneCountInString(request.Draft)),
+		zap.Int("reviewed_runes", utf8.RuneCountInString(normalized)),
 		zap.Int("renderings", renderings),
-	)
+	}
+	// Descriptions retell what members posted, so they only reach the logs
+	// when verbose payload logging is switched on.
+	if c.enableVerbosePayloadLogs {
+		fields = append(fields, zap.String("draft", request.Draft), zap.String("reviewed", normalized))
+	}
+
+	c.logInfo("check model reviewed media description", fields...)
 
 	if normalized == "" {
 		return "", ErrMediaUnreadable
