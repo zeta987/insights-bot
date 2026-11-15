@@ -83,6 +83,17 @@ func newMediaEnricher(model *Model) *mediaEnricher {
 	}
 }
 
+// withoutRequestURL drops the request URL from a network error: Bot API URLs
+// carry the bot token, and these errors end up in the logs.
+func withoutRequestURL(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err
+	}
+
+	return err
+}
+
 func messageQueueKey(message *tgbotapi.Message) string {
 	return fmt.Sprintf("%d/%d", message.Chat.ID, message.MessageID)
 }
@@ -548,7 +559,7 @@ func (e *mediaEnricher) download(ctx context.Context, fileID string, maxBytes in
 
 	fileURL, err := source.GetFileDirectURL(fileID)
 	if err != nil {
-		return nil, "", fmt.Errorf("get telegram file: %w", err)
+		return nil, "", fmt.Errorf("get telegram file: %w", withoutRequestURL(err))
 	}
 
 	parsed, err := url.Parse(fileURL)
@@ -565,12 +576,7 @@ func (e *mediaEnricher) download(ctx context.Context, fileID string, maxBytes in
 
 	response, err := e.httpClient.Do(request)
 	if err != nil {
-		var urlErr *url.Error
-		if errors.As(err, &urlErr) {
-			err = urlErr.Err
-		}
-
-		return nil, "", fmt.Errorf("download telegram file: %w", err)
+		return nil, "", fmt.Errorf("download telegram file: %w", withoutRequestURL(err))
 	}
 
 	defer func() { _ = response.Body.Close() }()
@@ -655,7 +661,7 @@ func (e *mediaEnricher) customEmojiStickers(ids []string) ([]customEmojiSticker,
 
 	response, err := source.MakeRequest("getCustomEmojiStickers", tgbotapi.Params{"custom_emoji_ids": string(encoded)})
 	if err != nil {
-		return nil, err
+		return nil, withoutRequestURL(err)
 	}
 
 	var stickers []customEmojiSticker

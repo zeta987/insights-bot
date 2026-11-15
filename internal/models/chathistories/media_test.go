@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image/color"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -114,6 +116,29 @@ func cleanupMediaChat(t *testing.T, chatID int64) {
 	t.Cleanup(func() {
 		_, _ = model.ent.ChatHistories.Delete().Where(chathistories.ChatID(chatID)).Exec(context.Background())
 	})
+}
+
+type failingTelegramFileSource struct{}
+
+func (failingTelegramFileSource) GetFileDirectURL(string) (string, error) {
+	return "", &url.Error{Op: "Post", URL: "https://api.telegram.org/botSECRET-TOKEN/getFile", Err: errors.New("connection reset")}
+}
+
+func (failingTelegramFileSource) MakeRequest(string, tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+	return nil, &url.Error{Op: "Post", URL: "https://api.telegram.org/botSECRET-TOKEN/getCustomEmojiStickers", Err: errors.New("timeout")}
+}
+
+func TestMediaEnricherKeepsBotTokenOutOfErrors(t *testing.T) {
+	mediaModel, _, _ := newMediaTestModel(t, func(openai.MediaDescriptionRequest) (string, error) { return "", nil }, nil)
+	mediaModel.SetTelegramFileSource(failingTelegramFileSource{})
+
+	_, _, err := mediaModel.media.download(context.Background(), "file", 1024)
+	require.ErrorContains(t, err, "connection reset")
+	require.NotContains(t, err.Error(), "SECRET-TOKEN")
+
+	_, err = mediaModel.media.customEmojiStickers([]string{"1"})
+	require.ErrorContains(t, err, "timeout")
+	require.NotContains(t, err.Error(), "SECRET-TOKEN")
 }
 
 func TestComposeHistoryTextRecordsMediaPlaceholders(t *testing.T) {

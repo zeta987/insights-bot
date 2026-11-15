@@ -31,7 +31,9 @@ const (
 )
 
 const (
-	officePartLimit      = 8 << 20
+	officePartLimit = 8 << 20
+	// officeTotalLimit bounds what one file may decompress across all parts.
+	officeTotalLimit     = 24 << 20
 	officeTextRuneLimit  = 12000
 	spreadsheetRowLimit  = 80
 	spreadsheetSheetMax  = 3
@@ -88,7 +90,14 @@ func documentText(data []byte) (string, error) {
 	return text, nil
 }
 
-func readZipPart(file *zip.File) ([]byte, error) {
+// readZipPart decompresses one part, charging it to budget so a zip bomb
+// spread over many parts still stops at officeTotalLimit.
+func readZipPart(file *zip.File, budget *int64) ([]byte, error) {
+	limit := min(int64(officePartLimit), *budget)
+	if limit <= 0 {
+		return nil, errors.New("office file is too large")
+	}
+
 	reader, err := file.Open()
 	if err != nil {
 		return nil, err
@@ -96,15 +105,39 @@ func readZipPart(file *zip.File) ([]byte, error) {
 
 	defer func() { _ = reader.Close() }()
 
-	data, err := io.ReadAll(io.LimitReader(reader, officePartLimit+1))
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > officePartLimit {
+	if int64(len(data)) > limit {
 		return nil, fmt.Errorf("%s is too large", file.Name)
 	}
 
+	*budget -= int64(len(data))
+
 	return data, nil
+}
+
+// officeTextFull reports when enough text has been collected; text past the
+// rune limit is dropped anyway.
+func officeTextFull(builder *strings.Builder) bool {
+	return builder.Len() >= officeTextRuneLimit*utf8.UTFMax
+}
+
+// truncateRunePrefix keeps the first limit runes without converting the whole
+// string.
+func truncateRunePrefix(text string, limit int) string {
+	count := 0
+
+	for index := range text {
+		if count == limit {
+			return text[:index]
+		}
+
+		count++
+	}
+
+	return text
 }
 
 // xmlText collects the character data of elements named textElement. A
@@ -183,13 +216,13 @@ func findZipPart(files []*zip.File, name string) *zip.File {
 
 // spreadsheetSharedStrings reads xl/sharedStrings.xml, where cells of type "s"
 // keep their text.
-func spreadsheetSharedStrings(files []*zip.File) []string {
+func spreadsheetSharedStrings(files []*zip.File, budget *int64) []string {
 	part := findZipPart(files, "xl/sharedStrings.xml")
 	if part == nil {
 		return nil
 	}
 
-	data, err := readZipPart(part)
+	data, err := readZipPart(part, budget)
 	if err != nil {
 		return nil
 	}
@@ -313,6 +346,8 @@ func extractOfficeText(data []byte, fileName string) (string, error) {
 
 	var builder strings.Builder
 
+	budget := int64(officeTotalLimit)
+
 	switch strings.ToLower(path.Ext(fileName)) {
 	case ".docx":
 		part := findZipPart(archive.File, "word/document.xml")
@@ -320,7 +355,7 @@ func extractOfficeText(data []byte, fileName string) (string, error) {
 			return "", errors.New("word/document.xml is missing")
 		}
 
-		content, err := readZipPart(part)
+		content, err := readZipPart(part, &budget)
 		if err != nil {
 			return "", err
 		}
@@ -328,28 +363,28 @@ func extractOfficeText(data []byte, fileName string) (string, error) {
 		builder.WriteString(xmlText(content, "t", "p"))
 	case ".pptx":
 		for i, part := range numberedParts(archive.File, "ppt/slides/slide") {
-			if i >= presentationSlideMax {
+			if i >= presentationSlideMax || officeTextFull(&builder) {
 				break
 			}
 
-			content, err := readZipPart(part)
+			content, err := readZipPart(part, &budget)
 			if err != nil {
-				continue
+				break
 			}
 
 			fmt.Fprintf(&builder, "Slide %d:\n%s\n", i+1, xmlText(content, "t", "p"))
 		}
 	case ".xlsx":
-		sharedStrings := spreadsheetSharedStrings(archive.File)
+		sharedStrings := spreadsheetSharedStrings(archive.File, &budget)
 
 		for i, part := range numberedParts(archive.File, "xl/worksheets/sheet") {
-			if i >= spreadsheetSheetMax {
+			if i >= spreadsheetSheetMax || officeTextFull(&builder) {
 				break
 			}
 
-			content, err := readZipPart(part)
+			content, err := readZipPart(part, &budget)
 			if err != nil {
-				continue
+				break
 			}
 
 			fmt.Fprintf(&builder, "Sheet %d:\n%s\n", i+1, spreadsheetSheetText(content, sharedStrings))
@@ -358,12 +393,9 @@ func extractOfficeText(data []byte, fileName string) (string, error) {
 		return "", fmt.Errorf("unsupported office file %q", fileName)
 	}
 
-	text := strings.TrimSpace(builder.String())
+	text := strings.TrimSpace(truncateRunePrefix(builder.String(), officeTextRuneLimit))
 	if text == "" {
 		return "", errors.New("office file has no text")
-	}
-	if utf8.RuneCountInString(text) > officeTextRuneLimit {
-		text = string([]rune(text)[:officeTextRuneLimit])
 	}
 
 	return text, nil

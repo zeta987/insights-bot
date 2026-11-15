@@ -44,7 +44,14 @@ const (
 	imageDarkContentLum = 0.55
 )
 
+// imageMaxPixels refuses images whose header promises more pixels than a
+// sticker or photo needs, so a tiny file cannot make decoding allocate
+// gigabytes.
+const imageMaxPixels = 16 << 20
+
 var errImageVariantNotApplicable = errors.New("image variant does not apply to this image")
+
+var errImageTooLarge = errors.New("image is too large to render")
 
 type imageStats struct {
 	width, height  int
@@ -180,6 +187,14 @@ func stretchContrast(img *image.NRGBA) {
 // errImageVariantNotApplicable when the variant would not change anything,
 // such as inverting the background of an opaque photo.
 func prepareImage(data []byte, variant imageVariant) ([]byte, string, error) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", err
+	}
+	if config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > imageMaxPixels {
+		return nil, "", errImageTooLarge
+	}
+
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, "", err

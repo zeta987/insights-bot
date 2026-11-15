@@ -3,6 +3,8 @@ package chathistories
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -144,6 +146,37 @@ func TestPrepareImageStretchesContrast(t *testing.T) {
 	img := decodeTestImage(t, data)
 	requireGray(t, img, 0, 150, 0x00)
 	requireGray(t, img, 299, 150, 0xff)
+}
+
+// pngHeaderOnly returns a PNG whose header claims the given size but that
+// holds no pixel data, the shape of a decompression bomb.
+func pngHeaderOnly(width, height uint32) []byte {
+	chunk := func(kind string, data []byte) []byte {
+		var buffer bytes.Buffer
+
+		_ = binary.Write(&buffer, binary.BigEndian, uint32(len(data))) //nolint:gosec // chunk data is a few bytes
+
+		buffer.WriteString(kind)
+		buffer.Write(data)
+		_ = binary.Write(&buffer, binary.BigEndian, crc32.ChecksumIEEE(append([]byte(kind), data...)))
+
+		return buffer.Bytes()
+	}
+
+	header := make([]byte, 13)
+	binary.BigEndian.PutUint32(header[0:4], width)
+	binary.BigEndian.PutUint32(header[4:8], height)
+	header[8], header[9] = 8, 6 // 8-bit RGBA
+
+	data := []byte("\x89PNG\r\n\x1a\n")
+	data = append(data, chunk("IHDR", header)...)
+
+	return append(data, chunk("IEND", nil)...)
+}
+
+func TestPrepareImageRefusesHugeDimensions(t *testing.T) {
+	_, _, err := prepareImage(pngHeaderOnly(20000, 20000), imageVariantContrast)
+	require.ErrorIs(t, err, errImageTooLarge)
 }
 
 func TestPrepareImageRejectsUndecodableData(t *testing.T) {

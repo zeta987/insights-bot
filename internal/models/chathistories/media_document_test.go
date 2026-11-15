@@ -3,6 +3,7 @@ package chathistories
 import (
 	"archive/zip"
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -113,6 +114,28 @@ func TestDocumentKindAndHandling(t *testing.T) {
 		require.Equal(t, table.kind, kind, table.name)
 		require.Equal(t, table.handling, handling, table.name)
 	}
+}
+
+func TestReadZipPartChargesTheBudget(t *testing.T) {
+	data := makeTestZip(t, map[string]string{"part.xml": strings.Repeat("a", 1000)})
+
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	require.NoError(t, err)
+
+	small := int64(500)
+	_, err = readZipPart(archive.File[0], &small)
+	require.Error(t, err, "a part larger than the remaining budget is refused")
+
+	budget := int64(2000)
+	content, err := readZipPart(archive.File[0], &budget)
+	require.NoError(t, err)
+	require.Len(t, content, 1000)
+	require.Equal(t, int64(1000), budget)
+}
+
+func TestTruncateRunePrefix(t *testing.T) {
+	require.Equal(t, "店面營", truncateRunePrefix("店面營收", 3))
+	require.Equal(t, "短", truncateRunePrefix("短", 3))
 }
 
 func TestDocumentTextRejectsBinary(t *testing.T) {
