@@ -632,6 +632,7 @@ func (c *OpenAIClient) repairCondensedOutputByCheckModel(ctx context.Context, ra
 		if checkTrace != nil {
 			checkTrace.Generation.PrimaryUsedModel = ""
 			checkTrace.Generation.BackupUsedModel = backupUsedModel
+			checkTrace.Generation.BackupRequestedModel = backupModel
 			checkTrace.Generation.BackupSucceeded = true
 			checkTrace.Generation.BackupFailureReason = ""
 		}
@@ -960,7 +961,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				zap.Error(err),
 			)
 
-			backupResp, _, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_primary_error")
+			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_primary_error")
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
@@ -975,6 +976,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				trace.Generation.BackupSucceeded = true
 				trace.Generation.PrimaryUsedModel = ""
 				trace.Generation.BackupUsedModel = backupUsedModel
+				trace.Generation.BackupRequestedModel = backupRequestedModel
 			}
 		} else {
 			if trace != nil {
@@ -1017,7 +1019,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				zap.String("problem", problem),
 			)
 
-			backupResp, _, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_empty_content")
+			backupResp, backupRequestedModel, backupUsedModel, backupErr := tryRecapBackupModels("recap_backup_after_empty_content")
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
@@ -1032,6 +1034,7 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 				trace.Generation.BackupSucceeded = true
 				trace.Generation.PrimaryUsedModel = ""
 				trace.Generation.BackupUsedModel = backupUsedModel
+				trace.Generation.BackupRequestedModel = backupRequestedModel
 			}
 		} else {
 			if trace != nil {
@@ -1221,13 +1224,14 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 				zap.Error(err),
 			)
 
-			backupResp, _, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+			backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
 					trace.Generation.BackupFailureReason = backupErr.Error()
 					if backupUsedModel != "" {
 						trace.Generation.BackupUsedModel = backupUsedModel
+						trace.Generation.BackupRequestedModel = backupRequestedModel
 					}
 				}
 
@@ -1248,6 +1252,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 					trace.Generation.BackupSucceeded = true
 					trace.Generation.PrimaryUsedModel = ""
 					trace.Generation.BackupUsedModel = backupUsedModel
+					trace.Generation.BackupRequestedModel = backupRequestedModel
 				}
 			}
 		} else {
@@ -1274,13 +1279,14 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			trace.Generation.BackupUsed = true
 		}
 
-		backupResp, _, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+		backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
 		if backupErr != nil {
 			if trace != nil {
 				trace.Generation.BackupSucceeded = false
 				trace.Generation.BackupFailureReason = backupErr.Error()
 				if backupUsedModel != "" {
 					trace.Generation.BackupUsedModel = backupUsedModel
+					trace.Generation.BackupRequestedModel = backupRequestedModel
 				}
 			}
 
@@ -1301,6 +1307,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 				trace.Generation.BackupSucceeded = true
 				trace.Generation.PrimaryUsedModel = ""
 				trace.Generation.BackupUsedModel = backupUsedModel
+				trace.Generation.BackupRequestedModel = backupRequestedModel
 			}
 		}
 	}
@@ -1317,13 +1324,14 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 				trace.Generation.BackupUsed = true
 			}
 
-			backupResp, _, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
+			backupResp, backupRequestedModel, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
 			if backupErr != nil {
 				if trace != nil {
 					trace.Generation.BackupSucceeded = false
 					trace.Generation.BackupFailureReason = backupErr.Error()
 					if backupUsedModel != "" {
 						trace.Generation.BackupUsedModel = backupUsedModel
+						trace.Generation.BackupRequestedModel = backupRequestedModel
 					}
 				}
 
@@ -1344,6 +1352,7 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 					trace.Generation.BackupSucceeded = true
 					trace.Generation.PrimaryUsedModel = ""
 					trace.Generation.BackupUsedModel = backupUsedModel
+					trace.Generation.BackupRequestedModel = backupRequestedModel
 				}
 			}
 		} else {

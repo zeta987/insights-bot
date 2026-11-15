@@ -8,11 +8,15 @@ type GenerationModelExecutionTrace struct {
 	PrimaryFailed        bool   `json:"primaryFailed"`
 	PrimaryFailureReason string `json:"primaryFailureReason"`
 
-	BackupModel         string `json:"backupModel"`
-	BackupUsed          bool   `json:"backupUsed"`
-	BackupUsedModel     string `json:"backupUsedModel"`
-	BackupSucceeded     bool   `json:"backupSucceeded"`
-	BackupFailureReason string `json:"backupFailureReason"`
+	// BackupModel is the configured backup list; BackupRequestedModel is the
+	// entry from it that answered, and BackupUsedModel is the name the
+	// gateway reported for that answer.
+	BackupModel          string `json:"backupModel"`
+	BackupUsed           bool   `json:"backupUsed"`
+	BackupRequestedModel string `json:"backupRequestedModel"`
+	BackupUsedModel      string `json:"backupUsedModel"`
+	BackupSucceeded      bool   `json:"backupSucceeded"`
+	BackupFailureReason  string `json:"backupFailureReason"`
 }
 
 type RecapExecutionTrace struct {

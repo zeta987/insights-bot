@@ -72,6 +72,7 @@ func mergeGenerationModelExecutionTrace(dst *openai.GenerationModelExecutionTrac
 	dst.PrimaryFailed = dst.PrimaryFailed || src.PrimaryFailed
 	dst.PrimaryFailureReason = mergeUniqueTraceText(dst.PrimaryFailureReason, src.PrimaryFailureReason)
 	dst.BackupModel = mergeUniqueTraceText(dst.BackupModel, src.BackupModel)
+	dst.BackupRequestedModel = mergeUniqueTraceText(dst.BackupRequestedModel, src.BackupRequestedModel)
 	dst.BackupUsedModel = mergeUniqueTraceText(dst.BackupUsedModel, src.BackupUsedModel)
 	dst.BackupUsed = dst.BackupUsed || src.BackupUsed
 	dst.BackupSucceeded = dst.BackupSucceeded || src.BackupSucceeded

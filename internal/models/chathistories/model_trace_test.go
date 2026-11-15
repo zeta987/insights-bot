@@ -154,3 +154,108 @@ func TestBuildRichRecapModelInfoShowsBackupThatSuppliedCheckRepair(t *testing.T)
 	require.Contains(t, info, "> - 濃縮總結：resolvedBackupSource")
 	require.Contains(t, info, "> - 校對模型：resolvedCheck")
 }
+
+func TestBuildRichRecapModelInfoKeepsConfiguredEffortSuffix(t *testing.T) {
+	info := BuildRichRecapModelInfo(
+		&openai.CondensedExecutionTrace{
+			Generation: openai.GenerationModelExecutionTrace{
+				PrimaryModel:     "gemini-3.8-flash-high",
+				PrimaryUsedModel: "gemini-3.8-flash",
+			},
+			Check: openai.ConditionalModelExecutionTrace{
+				Attempted: true,
+				Succeeded: true,
+				Generation: openai.GenerationModelExecutionTrace{
+					PrimaryModel:     "gpt-6.1-sol-xhigh",
+					PrimaryUsedModel: "gpt-6.1-sol",
+				},
+			},
+		},
+		&openai.RecapExecutionTrace{Generation: openai.GenerationModelExecutionTrace{
+			PrimaryModel:         "gemini-4-carbon-high",
+			PrimaryUsedModel:     "gemini-4-carbon",
+			BackupModel:          "gemini-3.8-flash-high, gpt-6.1-sol-xhigh",
+			BackupUsed:           true,
+			BackupRequestedModel: "gpt-6.1-sol-xhigh",
+			BackupUsedModel:      "gpt-6.1-sol",
+			BackupSucceeded:      true,
+		}},
+	)
+
+	require.Contains(t, info, "> - 濃縮總結："+EscapeRichMarkdownText("gemini-3.8-flash-high"))
+	require.Contains(t, info, "> - 詳細總結："+EscapeRichMarkdownText("gemini-4-carbon-high、gpt-6.1-sol-xhigh"))
+	require.Contains(t, info, "> - 校對模型："+EscapeRichMarkdownText("gpt-6.1-sol-xhigh"))
+}
+
+func TestGenerationModelNameDisplay(t *testing.T) {
+	tables := []struct {
+		name     string
+		trace    openai.GenerationModelExecutionTrace
+		expected string
+	}{
+		{
+			name:     "suffix dropped by gateway",
+			trace:    openai.GenerationModelExecutionTrace{PrimaryModel: "gpt-6.1-sol-xhigh", PrimaryUsedModel: "gpt-6.1-sol"},
+			expected: "gpt-6.1-sol-xhigh",
+		},
+		{
+			name:     "alias resolved to another model",
+			trace:    openai.GenerationModelExecutionTrace{PrimaryModel: "checkAlias", PrimaryUsedModel: "resolvedCheck"},
+			expected: "resolvedCheck",
+		},
+		{
+			name:     "resolved name longer than configured",
+			trace:    openai.GenerationModelExecutionTrace{PrimaryModel: "gpt-6.1-sol", PrimaryUsedModel: "gpt-6.1-sol-2026-10-01"},
+			expected: "gpt-6.1-sol-2026-10-01",
+		},
+		{
+			name: "backup found in configured list",
+			trace: openai.GenerationModelExecutionTrace{
+				PrimaryFailed:   true,
+				BackupModel:     "gemini-4-carbon-high, gpt-6.1-sol-xhigh",
+				BackupUsed:      true,
+				BackupUsedModel: "gemini-4-carbon",
+				BackupSucceeded: true,
+			},
+			expected: "gemini-4-carbon-high",
+		},
+		{
+			name: "ambiguous backup list keeps resolved name",
+			trace: openai.GenerationModelExecutionTrace{
+				PrimaryFailed:   true,
+				BackupModel:     "gpt-6.1-sol-high, gpt-6.1-sol-xhigh",
+				BackupUsed:      true,
+				BackupUsedModel: "gpt-6.1-sol",
+				BackupSucceeded: true,
+			},
+			expected: "gpt-6.1-sol",
+		},
+		{
+			name: "requested backup settles ambiguity",
+			trace: openai.GenerationModelExecutionTrace{
+				PrimaryFailed:        true,
+				BackupModel:          "gpt-6.1-sol-high, gpt-6.1-sol-xhigh",
+				BackupUsed:           true,
+				BackupRequestedModel: "gpt-6.1-sol-xhigh",
+				BackupUsedModel:      "gpt-6.1-sol",
+				BackupSucceeded:      true,
+			},
+			expected: "gpt-6.1-sol-xhigh",
+		},
+		{
+			name: "merged detail slices",
+			trace: openai.GenerationModelExecutionTrace{
+				PrimaryModel:     "gemini-4-carbon-high",
+				PrimaryUsedModel: "gemini-4-carbon, gemini-4-carbon-preview",
+			},
+			expected: "gemini-4-carbon-high、gemini-4-carbon-preview",
+		},
+	}
+
+	for _, table := range tables {
+		t.Run(table.name, func(t *testing.T) {
+			trace := table.trace
+			require.Equal(t, table.expected, generationModelName(&trace))
+		})
+	}
+}

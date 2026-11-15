@@ -29,15 +29,74 @@ func appendUniqueModelName(models []string, candidate string) []string {
 	return append(models, candidate)
 }
 
+func splitModelNames(names string) []string {
+	parts := strings.Split(names, ",")
+	models := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		if model := strings.TrimSpace(part); model != "" {
+			models = append(models, model)
+		}
+	}
+
+	return models
+}
+
+// displayModelName shows the configured name when the gateway answered with
+// that name minus a suffix, such as a reasoning-effort tag: a request for
+// "gpt-6.1-sol-xhigh" answered as "gpt-6.1-sol" is shown as the request.
+// Any other answer, such as an alias mapped to a different model, is shown as
+// the gateway reported it, and so is a name that more than one configured
+// entry could have produced.
+func displayModelName(resolved string, configured string) string {
+	resolved = strings.TrimSpace(resolved)
+	if resolved == "" {
+		return ""
+	}
+
+	match := ""
+
+	for _, candidate := range splitModelNames(configured) {
+		if !strings.HasPrefix(candidate, resolved+"-") {
+			continue
+		}
+		if match != "" && match != candidate {
+			return resolved
+		}
+
+		match = candidate
+	}
+	if match == "" {
+		return resolved
+	}
+
+	return match
+}
+
+// appendDisplayedModelNames adds each resolved name, which may be a merged
+// comma-separated list, as it should be displayed.
+func appendDisplayedModelNames(models []string, resolved string, configured string) []string {
+	for _, model := range splitModelNames(resolved) {
+		models = appendUniqueModelName(models, displayModelName(model, configured))
+	}
+
+	return models
+}
+
 func generationModelName(trace *openai.GenerationModelExecutionTrace) string {
 	if trace == nil {
 		return "資訊不可用"
 	}
 
 	usedModels := make([]string, 0, 2)
-	usedModels = appendUniqueModelName(usedModels, trace.PrimaryUsedModel)
+	usedModels = appendDisplayedModelNames(usedModels, trace.PrimaryUsedModel, trace.PrimaryModel)
 	if trace.BackupUsed && trace.BackupSucceeded {
-		usedModels = appendUniqueModelName(usedModels, pickModelName(trace.BackupUsedModel, trace.BackupModel))
+		backupConfigured := pickModelName(trace.BackupRequestedModel, trace.BackupModel)
+		if strings.TrimSpace(trace.BackupUsedModel) != "" {
+			usedModels = appendDisplayedModelNames(usedModels, trace.BackupUsedModel, backupConfigured)
+		} else {
+			usedModels = appendUniqueModelName(usedModels, backupConfigured)
+		}
 	}
 	if len(usedModels) > 0 {
 		return strings.Join(usedModels, "、")

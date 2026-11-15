@@ -312,6 +312,7 @@ func TestSummarizeChatHistoriesRecordsResolvedBackupModel(t *testing.T) {
 	require.True(t, trace.Generation.BackupSucceeded)
 	require.Empty(t, trace.Generation.PrimaryUsedModel)
 	require.Equal(t, "resolved-detail-backup", trace.Generation.BackupUsedModel)
+	require.Equal(t, "detailBackup", trace.Generation.BackupRequestedModel)
 }
 
 func TestSarcasticCondenseRecordsConfiguredCheckModelWithoutCallingIt(t *testing.T) {
@@ -452,6 +453,7 @@ func TestSarcasticCondenseRecordsResolvedBackupModel(t *testing.T) {
 	require.True(t, trace.Generation.BackupSucceeded)
 	require.Empty(t, trace.Generation.PrimaryUsedModel)
 	require.Equal(t, "resolved-condensed-backup", trace.Generation.BackupUsedModel)
+	require.Equal(t, "condensedBackup", trace.Generation.BackupRequestedModel)
 }
 
 func TestSarcasticCondenseDoesNotRecordStructurallyInvalidPrimaryAsUsed(t *testing.T) {
@@ -644,6 +646,7 @@ func TestSarcasticCondenseCheckRepairsBackupAnswerWithoutTryingNextBackup(t *tes
 	require.Empty(t, trace.Generation.PrimaryUsedModel)
 	require.True(t, trace.Generation.BackupUsed)
 	require.Equal(t, "resolved-condensed-backup2", trace.Generation.BackupUsedModel)
+	require.Equal(t, "condensedBackup2", trace.Generation.BackupRequestedModel)
 	require.True(t, trace.Check.Succeeded)
 	require.Equal(t, "resolved-check-model", trace.Check.Generation.PrimaryUsedModel)
 }
@@ -711,6 +714,7 @@ func TestSarcasticCondenseUsesCheckBackupWhenPrimaryCheckOutputIsInvalid(t *test
 	require.True(t, trace.Check.Generation.BackupUsed)
 	require.True(t, trace.Check.Generation.BackupSucceeded)
 	require.Equal(t, "resolved-check-backup", trace.Check.Generation.BackupUsedModel)
+	require.Equal(t, "checkBackup", trace.Check.Generation.BackupRequestedModel)
 }
 
 func TestSarcasticCondenseForcedCheckFailureSwitchesToCheckBackup(t *testing.T) {
