@@ -44,6 +44,7 @@
 
 本 fork 的聊天记录回顾现在以 Telegram 原生 Rich Messages 直接发送，基于 Telegram Bot API 10.1（2026-06-11）的富文本消息能力，由 Telegram Desktop 6.9 系列客户端渲染，取代了此前的 Telegraph 页面方案。
 
+- v1.1.0 — 2026-11-16：新增媒体理解，图片、贴纸、自定义 emoji、GIF、视频、语音和文件都会生成描述并纳入回顾，由校对模型审查并按群组隔离；手动回顾会沿用并合并已有回顾；浓缩总结改为平实概览，备用模型只在调用失败时启用、格式问题交给 `CHECK_MODEL` 修正；对话补全改用流式接收，Rich Message 按 UTF-8 字节分段。
 - v1.0.0 — 2026-07-14：首个 fork 正式版本，引入原生 Rich Message 回顾、浓缩与详细双层总结、备用模型链，并移除 Telegraph 集成。
 
 详情见 [CHANGELOG.md](./CHANGELOG.md)。

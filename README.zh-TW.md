@@ -44,6 +44,7 @@
 
 此 fork（[zeta987/insights-bot](https://github.com/zeta987/insights-bot)）的版本一覽如下，完整內容請見 [CHANGELOG.md](./CHANGELOG.md)。
 
+- **v1.1.0**（2026-11-16）— 新增媒體理解：圖片、貼圖、自訂 emoji、GIF、影片、語音與檔案都會產生描述並納入回顧，由校對模型審查且依群組隔離；手動回顧會沿用並合併既有回顧；濃縮總結改為平實概覽，備援模型只在呼叫失敗時啟用、格式問題交給 `CHECK_MODEL` 修正；對話補全改用串流，Rich Message 改以 UTF-8 位元組分段。
 - **v1.0.0**（2026-07-14）— 首個 fork 正式版本：聊天記錄回顧改以 Telegram 原生 Rich Message 傳送（採用 Telegram Bot API 10.1（2026-06-11）新增的 `sendRichMessage` 系列介面，Telegram Desktop 6.9 系列起可完整顯示）並移除 Telegraph 整合，同時加入吐槽風格濃縮總結、備援模型鏈、`CHECK_MODEL` 條件式修復與摘要輸出語言設定等功能。
 
 ---
