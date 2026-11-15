@@ -36,7 +36,7 @@ func TestBuildRichRecapSummaryUsesClickableInitiatorAndClearHierarchy(t *testing
 		"> **模型資訊**\n>\n"+
 		"> - 濃縮總結：condensedModel\n"+
 		"> - 詳細總結：detailModel\n"+
-		"> - Check：checkModel", summary)
+		"> - 校對模型：checkModel", summary)
 }
 
 func TestBuildRichRecapSummaryAddsAutomaticAndSubscriptionNotices(t *testing.T) {

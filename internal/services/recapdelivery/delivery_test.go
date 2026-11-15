@@ -358,7 +358,7 @@ func TestRichRecapSummaryFallsBackToCompleteSegmentedPlainText(t *testing.T) {
 	require.Contains(t, plain, "用戶 TestUser(測試...) 發起 1 小時總結")
 	require.NotContains(t, plain, "tg://user")
 	require.Contains(t, plain, "模型資訊")
-	require.Contains(t, plain, "Check：checkModel")
+	require.Contains(t, plain, "校對模型：checkModel")
 	require.NotContains(t, plain, "> ")
 	require.Contains(t, plain, "1 (https://t.me/c/123/45)")
 }

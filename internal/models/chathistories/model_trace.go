@@ -83,6 +83,6 @@ func BuildRichRecapModelInfo(condensedTrace *openai.CondensedExecutionTrace, rec
 		">",
 		"> - 濃縮總結：" + EscapeRichMarkdownText(condensedModel),
 		"> - 詳細總結：" + EscapeRichMarkdownText(detailModel),
-		"> - Check：" + EscapeRichMarkdownText(checkModel),
+		"> - 校對模型：" + EscapeRichMarkdownText(checkModel),
 	}, "\n")
 }

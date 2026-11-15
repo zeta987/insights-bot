@@ -24,7 +24,7 @@ func TestBuildRichRecapModelInfoShowsConfiguredCheckModelInStandby(t *testing.T)
 		">",
 		"> - 濃縮總結：condensedModel",
 		"> - 詳細總結：detailModel",
-		"> - Check：checkModel",
+		"> - 校對模型：checkModel",
 	}, "\n"), info)
 	require.NotContains(t, info, "完成")
 	require.NotContains(t, info, "待命")
@@ -52,7 +52,7 @@ func TestBuildRichRecapModelInfoShowsCheckBackupRepair(t *testing.T) {
 		&openai.RecapExecutionTrace{Generation: openai.GenerationModelExecutionTrace{PrimaryModel: "detailModel"}},
 	)
 
-	require.Contains(t, info, "> - Check：checkBackup")
+	require.Contains(t, info, "> - 校對模型：checkBackup")
 	require.NotContains(t, info, "修復")
 	require.NotContains(t, info, "備用")
 	require.Equal(t, 5, len(strings.Split(info, "\n")))
@@ -69,8 +69,8 @@ func TestBuildRichRecapModelInfoTreatsBackupOnlyCheckConfigAsUnset(t *testing.T)
 		&openai.RecapExecutionTrace{Generation: openai.GenerationModelExecutionTrace{PrimaryModel: "detailModel"}},
 	)
 
-	require.Contains(t, info, "> - Check：未設定")
-	require.NotContains(t, info, "> - Check：checkBackup")
+	require.Contains(t, info, "> - 校對模型：未設定")
+	require.NotContains(t, info, "> - 校對模型：checkBackup")
 }
 
 func TestBuildRichRecapModelInfoShowsEveryModelThatProducedDetailSlices(t *testing.T) {
@@ -105,8 +105,8 @@ func TestBuildRichRecapModelInfoUsesResolvedSuccessfulCheckModel(t *testing.T) {
 		&openai.RecapExecutionTrace{Generation: openai.GenerationModelExecutionTrace{PrimaryUsedModel: "detailModel"}},
 	)
 
-	require.Contains(t, info, "> - Check：resolvedCheck")
-	require.NotContains(t, info, "> - Check：checkAlias")
+	require.Contains(t, info, "> - 校對模型：resolvedCheck")
+	require.NotContains(t, info, "> - 校對模型：checkAlias")
 }
 
 func TestBuildRichRecapModelInfoHidesFailedBackupModel(t *testing.T) {
@@ -152,5 +152,5 @@ func TestBuildRichRecapModelInfoShowsBackupThatSuppliedCheckRepair(t *testing.T)
 	)
 
 	require.Contains(t, info, "> - 濃縮總結：resolvedBackupSource")
-	require.Contains(t, info, "> - Check：resolvedCheck")
+	require.Contains(t, info, "> - 校對模型：resolvedCheck")
 }
