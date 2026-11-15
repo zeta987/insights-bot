@@ -60,23 +60,52 @@ type Model struct {
 	openAI   openai.Client
 	linkprev *linkprev.Client
 	redis    *datastore.Redis
+	// media is nil unless media understanding is enabled.
+	media *mediaEnricher
 }
 
 func NewModel() func(NewModelParams) (*Model, error) {
 	return func(param NewModelParams) (*Model, error) {
-		return &Model{
+		model := &Model{
 			config:   param.Config,
 			logger:   param.Logger,
 			ent:      param.Ent,
 			openAI:   param.OpenAI,
 			linkprev: linkprev.NewClient(),
 			redis:    param.Redis,
-		}, nil
+		}
+
+		if model.mediaEnabled() {
+			model.media = newMediaEnricher(model)
+
+			if param.Lifecycle != nil {
+				param.Lifecycle.Append(fx.Hook{
+					OnStart: func(context.Context) error {
+						model.media.start()
+						return nil
+					},
+					OnStop: model.media.stop,
+				})
+			}
+		}
+
+		return model, nil
+	}
+}
+
+// SetTelegramFileSource gives media enrichment the bot client it downloads
+// files and looks up custom emoji with. The bot is built after this model, so
+// it cannot be injected.
+func (m *Model) SetTelegramFileSource(source TelegramFileSource) {
+	if m.media != nil {
+		m.media.setSource(source)
 	}
 }
 
 func (m *Model) ExtractTextFromMessage(message *tgbotapi.Message) string {
 	text := lo.Ternary(message.Caption != "", message.Caption, message.Text)
+	entities := messageTextEntities(message)
+	customEmojiLabels := m.cachedCustomEmojiLabels(messageChatID(message), entities)
 
 	type MarkdownLink struct {
 		Markdown []uint16
@@ -85,13 +114,23 @@ func (m *Model) ExtractTextFromMessage(message *tgbotapi.Message) string {
 	}
 
 	textUTF16 := utf16.Encode([]rune(text))
-	links := lop.Map(message.Entities, func(entity tgbotapi.MessageEntity, i int) MarkdownLink {
+	links := lop.Map(entities, func(entity tgbotapi.MessageEntity, i int) MarkdownLink {
 		startIndex := entity.Offset
 		endIndex := startIndex + entity.Length
 		var title string
 		var href string
 
 		switch entity.Type {
+		case "custom_emoji":
+			// Keep the fallback emoji and add what the custom emoji shows.
+			label := customEmojiLabels[tgbot.CustomEmojiID(entity)]
+			if label == "" || startIndex < 0 || endIndex > len(textUTF16) {
+				return MarkdownLink{[]uint16{}, -1, -1}
+			}
+
+			fallback := string(utf16.Decode(textUTF16[startIndex:endIndex]))
+
+			return MarkdownLink{utf16.Encode([]rune(fallback + "〔" + label + "〕")), startIndex, endIndex}
 		case "url":
 			href = string(utf16.Decode(textUTF16[startIndex:endIndex]))
 
@@ -169,25 +208,16 @@ func (m *Model) extractTextWithSummarization(message *tgbotapi.Message) (string,
 	return text, nil
 }
 
+// extractTextFromMessage returns the text recorded for a message, with media
+// markers and custom emoji labels that are already cached. It never schedules
+// media enrichment.
 func (m *Model) extractTextFromMessage(message *tgbotapi.Message) (string, error) {
-	if message == nil {
-		return "", nil
-	}
-	if message.Text == "" && message.Caption == "" {
+	text, _, err := m.composeHistoryText(message, false)
+	if err == nil && text == "" && message != nil {
 		m.logger.Warn("message text is empty")
-		return "", nil
 	}
 
-	text, err := m.extractTextWithSummarization(message)
-	if err != nil {
-		return "", err
-	}
-	if text == "" {
-		m.logger.Warn("message text is empty")
-		return "", nil
-	}
-
-	return text, nil
+	return text, err
 }
 
 func (m *Model) assignReplyMessageDataForChatHistory(entity *ent.ChatHistoriesCreate, message *tgbotapi.Message) error {
@@ -195,7 +225,7 @@ func (m *Model) assignReplyMessageDataForChatHistory(entity *ent.ChatHistoriesCr
 		return nil
 	}
 
-	repliedToText, err := m.extractTextWithSummarization(message.ReplyToMessage)
+	repliedToText, _, err := m.composeHistoryText(message.ReplyToMessage, false)
 	if err != nil {
 		return err
 	}
@@ -213,11 +243,16 @@ func (m *Model) assignReplyMessageDataForChatHistory(entity *ent.ChatHistoriesCr
 }
 
 func (m *Model) SaveOneTelegramChatHistory(message *tgbotapi.Message) error {
-	text, err := m.extractTextFromMessage(message)
+	if message == nil {
+		return nil
+	}
+
+	text, needsMedia, err := m.composeHistoryText(message, true)
 	if err != nil {
 		return err
 	}
 	if text == "" {
+		m.logger.Warn("message text is empty")
 		return nil
 	}
 
@@ -231,15 +266,8 @@ func (m *Model) SaveOneTelegramChatHistory(message *tgbotapi.Message) error {
 		SetUsername(message.From.UserName).
 		SetFullName(tgbot.FullNameFromFirstAndLastName(message.From.FirstName, message.From.LastName)).
 		SetFromPlatform(int(FromPlatformTelegram)).
-		SetChattedAt(time.Unix(int64(message.Date), 0).UnixMilli())
-
-	if message.ForwardFrom != nil {
-		telegramChatHistoryCreate.SetText(fmt.Sprintf("[forwarded from %s]: %s", tgbot.FullNameFromFirstAndLastName(message.ForwardFrom.FirstName, message.ForwardFrom.LastName), text))
-	} else if message.ForwardFromChat != nil {
-		telegramChatHistoryCreate.SetText(fmt.Sprintf("[forwarded from %s]: %s", message.ForwardFromChat.Title, text))
-	} else {
-		telegramChatHistoryCreate.SetText(text)
-	}
+		SetChattedAt(time.Unix(int64(message.Date), 0).UnixMilli()).
+		SetText(text)
 
 	err = m.assignReplyMessageDataForChatHistory(telegramChatHistoryCreate, message)
 	if err != nil {
@@ -258,6 +286,10 @@ func (m *Model) SaveOneTelegramChatHistory(message *tgbotapi.Message) error {
 		zap.String("text", strings.ReplaceAll(telegramChatHistory.Text, "\n", " ")),
 	)
 
+	if needsMedia && m.media != nil {
+		m.media.enqueue(message)
+	}
+
 	return nil
 }
 
@@ -265,12 +297,13 @@ func (m *Model) UpdateOneTelegramChatHistory(message *tgbotapi.Message) error {
 	if message == nil {
 		return nil
 	}
-	if message.Text == "" && message.Caption == "" {
-		m.logger.Warn("message text is empty")
+
+	// A message still waiting for media enrichment is written by that job.
+	if m.media != nil && m.media.replaceIfQueued(message) {
 		return nil
 	}
 
-	text, err := m.extractTextWithSummarization(message)
+	text, needsMedia, err := m.composeHistoryText(message, true)
 	if err != nil {
 		return err
 	}
@@ -279,7 +312,26 @@ func (m *Model) UpdateOneTelegramChatHistory(message *tgbotapi.Message) error {
 		return nil
 	}
 
-	err = m.ent.ChatHistories.
+	if m.media != nil {
+		m.media.writeMu.Lock()
+		err = m.writeHistoryText(message, text)
+		m.media.writeMu.Unlock()
+	} else {
+		err = m.writeHistoryText(message, text)
+	}
+	if err != nil {
+		return err
+	}
+
+	if needsMedia && m.media != nil {
+		m.media.enqueue(message)
+	}
+
+	return nil
+}
+
+func (m *Model) writeHistoryText(message *tgbotapi.Message, text string) error {
+	err := m.ent.ChatHistories.
 		Update().
 		Where(
 			chathistories.ChatID(message.Chat.ID),

@@ -24,6 +24,10 @@ const (
 	// params: enabled for user id
 	RecapReplayFromPrivateMessageControl1 Key = "recap/replay_from_private_message/%d"
 
+	// MediaDescription1 caches what the media model said about one file or custom emoji in one chat.
+	// params: chat id, media kind and Telegram unique id, such as -100123/photo/AgAD...
+	MediaDescription1 Key = "media/description/%s"
+
 	// RecapReplayFromPrivateMessageBatch1 is the key for recapturing the replayed message from private messages.
 	// params: enabled for user id
 	RecapReplayFromPrivateMessageBatch1 Key = "recap/replay_from_private_message/%d/batch"

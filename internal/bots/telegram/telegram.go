@@ -66,6 +66,8 @@ func NewBot() func(param NewBotParam) (*tgbot.BotService, error) {
 			return nil, err
 		}
 
+		param.ChatHistories.SetTelegramFileSource(bot.BotAPI)
+
 		param.Lifecycle.Append(fx.Hook{
 			OnStop: func(ctx context.Context) error {
 				return bot.Stop(ctx)
