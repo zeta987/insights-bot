@@ -480,32 +480,45 @@ func TestSarcasticCondenseDoesNotRecordStructurallyInvalidPrimaryAsUsed(t *testi
 	require.Empty(t, trace.Generation.PrimaryUsedModel)
 }
 
-func TestSarcasticCondenseCheckRepairsResolvedBackupSourceOnly(t *testing.T) {
-	requestedModels := make([]string, 0, 3)
+// condensedCompletionBody builds a non-streaming chat completion body that
+// streamChatCompletions turns into a stream.
+func condensedCompletionBody(model string, content string) []byte {
+	return fmt.Appendf(nil,
+		`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
+		model,
+		content,
+	)
+}
+
+func writeCondensedError(t *testing.T, writer http.ResponseWriter, status int, message string) {
+	t.Helper()
+
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(status)
+	_, err := writer.Write(fmt.Appendf(nil, `{"error":{"message":%q,"type":"server_error"}}`, message))
+	require.NoError(t, err)
+}
+
+func TestSarcasticCondenseRepairsInvalidPrimaryWithoutCallingBackup(t *testing.T) {
+	requestedModels := make([]string, 0, 2)
 	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Model string `json:"model"`
 		}
+
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		requestedModels = append(requestedModels, payload.Model)
 
 		responseModel := "resolved-condensed-primary"
-		content := "- 主模型只回了一個清單項"
-		switch payload.Model {
-		case "condensedBackup":
-			responseModel = "resolved-condensed-backup"
-			content = "- 備援模型也只回了一個清單項"
-		case "checkModel":
+		content := "```markdown\n**主題**：主模型把整段包進了程式碼區塊。\n```"
+
+		if payload.Model == "checkModel" {
 			responseModel = "resolved-check-model"
-			content = "**修復後摘要**——Check 把備援內容縫成一句話。"
+			content = "**修復後摘要**：Check 拿掉了外層的程式碼區塊。"
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		_, err := writer.Write([]byte(fmt.Sprintf(
-			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
-			responseModel,
-			content,
-		)))
+		_, err := writer.Write(condensedCompletionBody(responseModel, content))
 		require.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
@@ -525,46 +538,30 @@ func TestSarcasticCondenseCheckRepairsResolvedBackupSourceOnly(t *testing.T) {
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "修復後摘要")
-	require.Equal(t, []string{"condensedPrimary", "condensedBackup", "checkModel"}, requestedModels)
-	require.Empty(t, trace.Generation.PrimaryUsedModel)
-	require.True(t, trace.Generation.BackupUsed)
-	require.False(t, trace.Generation.BackupSucceeded)
-	require.Equal(t, "resolved-condensed-backup", trace.Generation.BackupUsedModel)
+	require.Equal(t, "**修復後摘要**：Check 拿掉了外層的程式碼區塊。", result)
+	require.Equal(t, []string{"condensedPrimary", "checkModel"}, requestedModels)
+	require.Equal(t, "resolved-condensed-primary", trace.Generation.PrimaryUsedModel)
+	require.True(t, trace.Generation.PrimaryFailed)
+	require.Contains(t, trace.Generation.PrimaryFailureReason, "code fence")
+	require.False(t, trace.Generation.BackupUsed)
+	require.Empty(t, trace.Generation.BackupUsedModel)
+	require.True(t, trace.Check.Attempted)
 	require.True(t, trace.Check.Succeeded)
 	require.Equal(t, "resolved-check-model", trace.Check.Generation.PrimaryUsedModel)
 }
 
-func TestSarcasticCondenseCheckRepairsPrimaryAfterBackupTransportFailure(t *testing.T) {
-	requestedModels := make([]string, 0, 3)
+func TestSarcasticCondenseFailsInvalidPrimaryWithoutCheckModelOrBackup(t *testing.T) {
+	requestedModels := make([]string, 0, 1)
 	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
 		var payload struct {
 			Model string `json:"model"`
 		}
+
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		requestedModels = append(requestedModels, payload.Model)
 
-		if payload.Model == "condensedBackup" {
-			writer.Header().Set("Content-Type", "application/json")
-			writer.WriteHeader(http.StatusBadGateway)
-			_, err := writer.Write([]byte(`{"error":{"message":"backup unavailable","type":"server_error"}}`))
-			require.NoError(t, err)
-			return
-		}
-
-		responseModel := "resolved-condensed-primary"
-		content := "- 主模型只回了一個清單項"
-		if payload.Model == "checkModel" {
-			responseModel = "resolved-check-model"
-			content = "**修復後摘要**——Check 把主模型內容縫成一句話。"
-		}
-
 		writer.Header().Set("Content-Type", "application/json")
-		_, err := writer.Write([]byte(fmt.Sprintf(
-			`{"id":"chatcmpl-test","object":"chat.completion","created":1730000000,"model":%q,"choices":[{"index":0,"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`,
-			responseModel,
-			content,
-		)))
+		_, err := writer.Write(condensedCompletionBody(payload.Model, "```\n主模型把整段包進了程式碼區塊。\n```"))
 		require.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
@@ -574,6 +571,62 @@ func TestSarcasticCondenseCheckRepairsPrimaryAfterBackupTransportFailure(t *test
 	richClient := &OpenAIClient{
 		sarcasticCondensedModelName:   "condensedPrimary",
 		sarcasticCondensedModelBackup: "condensedBackup",
+		client:                        goopenai.NewClientWithConfig(config),
+		logger:                        client.logger,
+		limiter:                       ratelimit.New(1000),
+	}
+	trace := &CondensedExecutionTrace{}
+
+	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
+
+	require.ErrorContains(t, err, "code fence")
+	require.Empty(t, result)
+	require.Equal(t, []string{"condensedPrimary"}, requestedModels)
+	require.False(t, trace.Generation.BackupUsed)
+}
+
+func TestSarcasticCondenseCheckRepairsBackupAnswerWithoutTryingNextBackup(t *testing.T) {
+	requestedModels := make([]string, 0, 4)
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		requestedModels = append(requestedModels, payload.Model)
+
+		switch payload.Model {
+		case "condensedPrimary":
+			writeCondensedError(t, writer, http.StatusTooManyRequests, "primary rate limited")
+			return
+		case "condensedBackup1":
+			writeCondensedError(t, writer, http.StatusBadGateway, "backup unavailable")
+			return
+		}
+
+		responseModel := "resolved-condensed-backup2"
+		content := "- 第二個備援只回了一個清單項"
+
+		switch payload.Model {
+		case "condensedBackup3":
+			responseModel = "resolved-condensed-backup3"
+			content = "**不該出現**：格式問題不該再換下一個備援。"
+		case "checkModel":
+			responseModel = "resolved-check-model"
+			content = "**修復後摘要**：Check 把備援內容縫成一句話。"
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := writer.Write(condensedCompletionBody(responseModel, content))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	config := goopenai.DefaultConfig("test-secret")
+	config.BaseURL = server.URL + "/v1"
+	richClient := &OpenAIClient{
+		sarcasticCondensedModelName:   "condensedPrimary",
+		sarcasticCondensedModelBackup: "condensedBackup1, condensedBackup2, condensedBackup3",
 		checkModelName:                "checkModel",
 		client:                        goopenai.NewClientWithConfig(config),
 		logger:                        client.logger,
@@ -584,14 +637,24 @@ func TestSarcasticCondenseCheckRepairsPrimaryAfterBackupTransportFailure(t *test
 	result, err := richClient.SarcasticCondense(WithCondensedExecutionTrace(context.Background(), trace), "TestUser: 測試")
 
 	require.NoError(t, err)
-	require.Contains(t, result, "修復後摘要")
-	require.Equal(t, []string{"condensedPrimary", "condensedBackup", "checkModel"}, requestedModels)
-	require.Equal(t, "resolved-condensed-primary", trace.Generation.PrimaryUsedModel)
+	require.Equal(t, "**修復後摘要**：Check 把備援內容縫成一句話。", result)
+	require.Equal(t, []string{"condensedPrimary", "condensedBackup1", "condensedBackup2", "checkModel"}, requestedModels)
+	require.True(t, trace.Generation.PrimaryFailed)
+	require.Contains(t, trace.Generation.PrimaryFailureReason, "429")
+	require.Empty(t, trace.Generation.PrimaryUsedModel)
 	require.True(t, trace.Generation.BackupUsed)
-	require.False(t, trace.Generation.BackupSucceeded)
-	require.Empty(t, trace.Generation.BackupUsedModel)
+	require.Equal(t, "resolved-condensed-backup2", trace.Generation.BackupUsedModel)
 	require.True(t, trace.Check.Succeeded)
 	require.Equal(t, "resolved-check-model", trace.Check.Generation.PrimaryUsedModel)
+}
+
+func TestCondensedOutputLogSampleCapsLongOutput(t *testing.T) {
+	short := "```\n短輸出\n```"
+	require.Equal(t, short, condensedOutputLogSample(short))
+
+	long := strings.Repeat("字", condensedOutputLogSampleRunes+5)
+	sample := condensedOutputLogSample(long)
+	require.Equal(t, strings.Repeat("字", condensedOutputLogSampleRunes)+"…", sample)
 }
 
 func TestSarcasticCondenseUsesCheckBackupWhenPrimaryCheckOutputIsInvalid(t *testing.T) {

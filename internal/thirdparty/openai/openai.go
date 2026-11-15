@@ -300,6 +300,20 @@ func invalidCondensedOutputReason(content string) string {
 	return ""
 }
 
+// condensedOutputLogSampleRunes caps how much rejected model output a warning
+// carries. A valid overview is 200-300 characters, so most rejected outputs
+// fit whole and the log shows where the format went wrong.
+const condensedOutputLogSampleRunes = 1000
+
+func condensedOutputLogSample(content string) string {
+	runes := []rune(content)
+	if len(runes) <= condensedOutputLogSampleRunes {
+		return content
+	}
+
+	return string(runes[:condensedOutputLogSampleRunes]) + "…"
+}
+
 func normalizeCondensedOutputContent(content string) (string, error) {
 	trimmed := strings.TrimSpace(content)
 	if reason := invalidCondensedOutputReason(trimmed); reason != "" {
@@ -506,6 +520,13 @@ func (c *OpenAIClient) callCheckModelRepairOnce(
 	checked := strings.TrimSpace(resp.Choices[0].Message.Content)
 	normalized, normalizeErr := normalizeStructuredCondensedOutputContent(checked)
 	if normalizeErr != nil {
+		c.logger.Warn("check model returned invalid condensed output",
+			zap.String("operation", operation),
+			zap.String("check_model", model),
+			zap.Error(normalizeErr),
+			zap.Int("output_runes", utf8.RuneCountInString(checked)),
+			zap.String("output_sample", condensedOutputLogSample(checked)),
+		)
 		return "", "", fmt.Errorf("check model returned invalid condensed output: %w", normalizeErr)
 	}
 
@@ -1125,12 +1146,12 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 		return normalized, true, nil
 	}
 
+	// tryCondensedBackupModels moves to the next backup only when a call fails
+	// or returns nothing. A backup that answers with a format problem stops the
+	// loop: the Check model repairs that answer instead of another model
+	// generating a new one.
 	tryCondensedBackupModels := func() (openai.ChatCompletionResponse, string, string, string, error) {
 		var lastErr error
-		var lastInvalidOutput string
-		var lastInvalidResp openai.ChatCompletionResponse
-		var lastInvalidRequestedModel string
-		var lastInvalidUsedModel string
 
 		for _, backupModel := range c.condensedBackupModels() {
 			backupResp, backupErr := c.callChatCompletionWithModel(
@@ -1141,49 +1162,39 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 			)
 			if backupErr != nil {
 				lastErr = backupErr
+
+				c.logger.Warn("backup model call failed for sarcastic condense",
+					zap.String("backup_model", backupModel),
+					zap.Error(backupErr),
+				)
 				continue
 			}
 			if len(backupResp.Choices) == 0 || strings.TrimSpace(backupResp.Choices[0].Message.Content) == "" {
 				lastErr = errors.New("no content generated from backup model")
-				continue
-			}
 
-			normalizedContent, normalizeErr := normalizeStructuredCondensedOutputContent(backupResp.Choices[0].Message.Content)
-			if normalizeErr != nil {
-				usedBackupModel := backupModel
-				if backupResp.Model != "" {
-					usedBackupModel = backupResp.Model
-				}
-
-				lastErr = normalizeErr
-				lastInvalidOutput = backupResp.Choices[0].Message.Content
-				lastInvalidResp = backupResp
-				lastInvalidRequestedModel = backupModel
-				lastInvalidUsedModel = usedBackupModel
-
-				c.logger.Warn("backup model generated invalid condensed output",
+				c.logger.Warn("backup model returned no condensed content",
 					zap.String("backup_model", backupModel),
-					zap.String("used_model", usedBackupModel),
-					zap.Error(normalizeErr),
 				)
 				continue
 			}
 
-			backupResp.Choices[0].Message.Content = normalizedContent
 			usedBackupModel := backupModel
 			if backupResp.Model != "" {
 				usedBackupModel = backupResp.Model
 			}
+
+			normalizedContent, normalizeErr := normalizeStructuredCondensedOutputContent(backupResp.Choices[0].Message.Content)
+			if normalizeErr != nil {
+				return backupResp, backupModel, usedBackupModel, backupResp.Choices[0].Message.Content, normalizeErr
+			}
+
+			backupResp.Choices[0].Message.Content = normalizedContent
 
 			return backupResp, backupModel, usedBackupModel, "", nil
 		}
 
 		if lastErr == nil {
 			lastErr = errors.New("all backup condensed models failed")
-		}
-
-		if strings.TrimSpace(lastInvalidOutput) != "" {
-			return lastInvalidResp, lastInvalidRequestedModel, lastInvalidUsedModel, lastInvalidOutput, lastErr
 		}
 
 		return openai.ChatCompletionResponse{}, "", "", "", lastErr
@@ -1344,78 +1355,35 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 		}
 	}
 
-	var invalidOutputForRepair string
 	normalizedContent, normalizeErr := normalizeStructuredCondensedOutputContent(resp.Choices[0].Message.Content)
 	if normalizeErr == nil {
 		resp.Choices[0].Message.Content = normalizedContent
 	} else {
-		invalidOutputForRepair = resp.Choices[0].Message.Content
+		// The model answered, so this is a format problem, not a failed call.
+		// The Check model repairs the answer; backups are not asked to
+		// generate a new one.
+		invalidOutput := resp.Choices[0].Message.Content
 		c.logger.Warn("condensed output is invalid",
 			zap.String("used_model", usedModel),
+			zap.Bool("from_backup", contentSourceIsBackup),
 			zap.Error(normalizeErr),
+			zap.Int("output_runes", utf8.RuneCountInString(invalidOutput)),
+			zap.String("output_sample", condensedOutputLogSample(invalidOutput)),
 		)
 		if trace != nil && !trace.Generation.BackupUsed {
 			trace.Generation.PrimaryFailed = true
 			trace.Generation.PrimaryFailureReason = normalizeErr.Error()
 		}
 
-		if len(c.condensedBackupModels()) > 0 && (trace == nil || !trace.Generation.BackupUsed) {
-			if trace != nil {
-				trace.Generation.PrimaryFailed = true
-				trace.Generation.PrimaryFailureReason = normalizeErr.Error()
-				trace.Generation.BackupUsed = true
-			}
-
-			c.logger.Warn("primary model generated invalid condensed output, retrying with backup model",
-				zap.String("primary_model", c.sarcasticCondensedModelName),
-				zap.String("backup_models", c.sarcasticCondensedModelBackup),
-				zap.String("used_model", usedModel),
-				zap.Error(normalizeErr),
-			)
-
-			backupResp, _, backupUsedModel, backupInvalidOutput, backupErr := tryCondensedBackupModels()
-			if backupErr == nil {
-				resp = backupResp
-				usedModel = backupUsedModel
-				contentSourceIsBackup = true
-				if trace != nil {
-					trace.Generation.BackupSucceeded = true
-					trace.Generation.PrimaryUsedModel = ""
-					trace.Generation.BackupUsedModel = backupUsedModel
-				}
-				normalizeErr = nil
-			} else {
-				if trace != nil {
-					trace.Generation.BackupSucceeded = false
-					trace.Generation.BackupFailureReason = backupErr.Error()
-					if backupUsedModel != "" {
-						trace.Generation.BackupUsedModel = backupUsedModel
-					}
-				}
-				if strings.TrimSpace(backupInvalidOutput) != "" {
-					invalidOutputForRepair = backupInvalidOutput
-					resp = backupResp
-					usedModel = backupUsedModel
-					contentSourceIsBackup = true
-				}
-			}
-		}
-
-		if normalizeErr != nil {
-			repairedOutput, attempted, repairErr := tryRepairInvalidCondensedOutput(invalidOutputForRepair)
-			if attempted {
-				if repairErr != nil {
-					return "", repairErr
-				}
-
-				resp.Choices[0].Message.Content = repairedOutput
-				normalizeErr = nil
-			}
-		}
-
-		if normalizeErr != nil {
+		repairedOutput, attempted, repairErr := tryRepairInvalidCondensedOutput(invalidOutput)
+		if !attempted {
 			return "", normalizeErr
 		}
+		if repairErr != nil {
+			return "", repairErr
+		}
+
+		resp.Choices[0].Message.Content = repairedOutput
 	}
 
 	if trace != nil {
