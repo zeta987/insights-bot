@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nekomeowww/insights-bot/internal/configs"
 	"github.com/nekomeowww/insights-bot/internal/datastore"
@@ -218,6 +220,68 @@ func TestChatHistorySummarizationPromptRequestsRichMarkdown(t *testing.T) {
 	require.NotContains(t, ChatHistorySummarizationSystemPrompt, "JSON Schema")
 	require.Contains(t, userPrompt.String(), "Traditional Chinese")
 	require.Contains(t, userPrompt.String(), "msgId:1")
+}
+
+func TestRecapGenerationSendsCurrentYearAndWebSearchTrigger(t *testing.T) {
+	requests := make(chan goopenai.ChatCompletionRequest, 2)
+	server := httptest.NewServer(streamChatCompletions(func(writer http.ResponseWriter, request *http.Request) {
+		var payload goopenai.ChatCompletionRequest
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			return
+		}
+		select {
+		case requests <- payload:
+		case <-request.Context().Done():
+			return
+		}
+		_, _ = io.WriteString(writer, `{"choices":[{"message":{"role":"assistant","content":"部署已完成，成員同意稍後驗證。"},"finish_reason":"stop"}]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	recapClient, err := NewClient(false)(NewClientParams{
+		Config: &configs.Config{
+			TimezoneShiftSeconds: 8 * 60 * 60,
+			OpenAI: configs.SectionOpenAI{
+				Host:      server.URL,
+				ModelName: "recap-model",
+			},
+		},
+		Logger: client.logger,
+	})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	history := "msgId:1: Zeta sent: 昨天完成部署。"
+	location := time.FixedZone("UTC+8", 8*60*60)
+	startedYear := time.Now().In(location).Year()
+	_, err = recapClient.SummarizeChatHistories(ctx, history, "Traditional Chinese")
+	require.NoError(t, err)
+	_, err = recapClient.SarcasticCondense(ctx, history)
+	require.NoError(t, err)
+	finishedYear := time.Now().In(location).Year()
+
+	require.Len(t, requests, 2)
+
+	for _, name := range []string{"detailed", "condensed"} {
+		request := <-requests
+
+		t.Run(name, func(t *testing.T) {
+			require.Len(t, request.Messages, 2)
+			system, user := request.Messages[0], request.Messages[1]
+			require.Equal(t, goopenai.ChatMessageRoleSystem, system.Role)
+			require.Equal(t, goopenai.ChatMessageRoleUser, user.Role)
+			require.Contains(t, user.Content, history)
+			require.Regexp(t, `上網|聯網|联网|搜尋|搜索`, user.Content)
+
+			year := regexp.MustCompile(`(?m)^Current year: (\d{4})\.$`).FindStringSubmatch(system.Content)
+			require.Len(t, year, 2)
+			require.Contains(t, []string{strconv.Itoa(startedYear), strconv.Itoa(finishedYear)}, year[1])
+			require.NotRegexp(t, `\d{4}-\d\d-\d\d`, system.Content)
+			require.NotContains(t, user.Content, "Current year:")
+		})
+	}
 }
 
 func TestSummarizeChatHistoriesReturnsRawRichMarkdown(t *testing.T) {

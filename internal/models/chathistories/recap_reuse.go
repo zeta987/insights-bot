@@ -137,10 +137,6 @@ func (m *Model) summarizeReusingRecaps(chatID int64, chatType telegram.ChatType,
 		zap.Int("uncovered_messages", len(uncovered)),
 	)
 
-	if len(chosen) == 1 && len(uncovered) == 0 {
-		return m.saveVerbatimReusedRecap(chatID, histories, chosen[0], reuse)
-	}
-
 	return m.mergeReusedRecaps(chatID, chatType, histories, chosen, uncovered, reuse)
 }
 
@@ -340,33 +336,6 @@ func stripRecapMarkers(markdown string) string {
 	}
 
 	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
-// saveVerbatimReusedRecap delivers the only earlier recap as it is, because
-// every message of the window is already in it. A new row keeps votes on this
-// delivery apart from the earlier one.
-func (m *Model) saveVerbatimReusedRecap(chatID int64, histories []*ent.ChatHistories, recap reusableRecap, reuse *RecapReuse) (*ManualRecapResult, error) {
-	stored := strings.TrimSpace(recap.log.RecapOutputs)
-	marked := storedRecapToMarkers(stored, chatID, newRecapMarkerSpace())
-	trace := &openai.RecapExecutionTrace{
-		Generation: openai.GenerationModelExecutionTrace{
-			PrimaryModel:     recap.log.ModelName,
-			PrimaryUsedModel: recap.log.ModelName,
-		},
-	}
-
-	logID, err := m.saveReusedRecap(chatID, histories, marked, stored, goopenai.Usage{}, recap.log.ModelName, 1)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ManualRecapResult{
-		LogID:           logID,
-		Summaries:       []string{stored},
-		Trace:           trace,
-		Reuse:           reuse,
-		CondensedSource: stripRecapMarkers(marked),
-	}, nil
 }
 
 func (m *Model) mergeReusedRecaps(

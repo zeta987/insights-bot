@@ -329,18 +329,21 @@ func TestSummarizeChatHistoriesReusingRecapsHonorsKillSwitch(t *testing.T) {
 	assert.Nil(t, result.Reuse)
 }
 
-func TestSummarizeChatHistoriesReusingRecapsReusesACompleteRecapAsIs(t *testing.T) {
+func TestSummarizeChatHistoriesReusingRecapsRechecksACompleteEarlierRecap(t *testing.T) {
 	f := newReuseTestFixture(t)
-	stored := "## 舊話題\n\n- 舊結論 [1](" + f.link(115) + ")"
+	stored := "## 舊話題\n\n- 有人聲稱烏拉圭總統今天死亡 [1](" + f.link(115) + ")"
 	earlier := f.saveRecap(101, 115, stored, nil)
+	f.openAI.MergeChatHistoriesRecapsStub = func(_ context.Context, parts []string, _ string) (*goopenai.ChatCompletionResponse, error) {
+		assert.Equal(t, []string{"## 舊話題\n\n- 有人聲稱烏拉圭總統今天死亡 {{tg-ref:1}}"}, parts)
+		return completion("## 舊話題\n\n- 有人聲稱烏拉圭總統今天死亡，消息未證實 {{tg-ref:1}}"), nil
+	}
 
 	result := f.summarize()
 
 	assert.Zero(t, f.openAI.SummarizeChatHistoriesCallCount())
-	assert.Zero(t, f.openAI.MergeChatHistoriesRecapsCallCount())
-	assert.Equal(t, []string{stored}, result.Summaries)
-	assert.Equal(t, "## 舊話題\n\n- 舊結論", result.CondensedSource)
-	assert.Equal(t, "old-model", result.Trace.Generation.PrimaryUsedModel)
+	assert.Equal(t, 1, f.openAI.MergeChatHistoriesRecapsCallCount())
+	assert.Equal(t, []string{"## 舊話題\n\n- 有人聲稱烏拉圭總統今天死亡，消息未證實 [1](" + f.link(115) + ")"}, result.Summaries)
+	assert.Equal(t, "## 舊話題\n\n- 有人聲稱烏拉圭總統今天死亡，消息未證實", result.CondensedSource)
 	require.NotNil(t, result.Reuse)
 	assert.Equal(t, 1, result.Reuse.ReusedRecaps)
 	assert.Zero(t, result.Reuse.SummarizedMessages)
@@ -348,8 +351,8 @@ func TestSummarizeChatHistoriesReusingRecapsReusesACompleteRecapAsIs(t *testing.
 	assert.NotEqual(t, earlier.ID, result.LogID)
 	saved := f.savedRecap(result.LogID)
 	assert.Equal(t, 1, saved.ReusedRecapCount)
-	assert.Equal(t, stored, saved.RecapOutputs)
-	assert.Equal(t, "old-model", saved.ModelName)
+	assert.Equal(t, result.Summaries[0], saved.RecapOutputs)
+	assert.Equal(t, reuseTestModelName, saved.ModelName)
 }
 
 func TestSummarizeChatHistoriesReusingRecapsFallsBackWhenMergeFails(t *testing.T) {

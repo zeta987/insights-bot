@@ -18,9 +18,9 @@ import (
 var ChatHistoriesRecapMergeSystemPrompt = `You merge detailed Telegram chat recaps into one detailed recap written as Rich Markdown.
 
 Rules:
-1) Each part recaps different messages of the same chat. The parts are ordered by their earliest message.
+1) The parts recap messages of the same chat and are ordered by their earliest message. A single part may cover the whole recap.
 2) Combine parts that discuss the same topic into one section, and keep unrelated topics as separate sections. Identify 1-20 topics in total.
-3) Keep every decision, disagreement, useful context, conclusion, name, and number from the parts. Do not drop a topic because only one part mentions it, and do not add anything that no part contains.
+3) Keep the decisions, disagreements, useful context, conclusions, names, and numbers from the parts. Preserve their attribution, dates, and uncertainty. Keep the discussion topics supplied in the parts, including topics mentioned in only one part. Apply the verification rules to consequential public claims in those topics.
 4) Output Rich Markdown only, using headings, paragraphs, and unordered lists. Do not add an introduction, and never mention the parts, earlier recaps, or the merging.
 5) Keep the controlled source markers such as {{tg-ref:1,2}}. Append the markers that support each factual paragraph or list item; when you merge statements, combine their msgId values. A marker may contain 1-5 comma-separated msgId values.
 6) Only use msgId values that appear in the markers of the parts. Never invent msgId values and never emit ordinary Telegram message URLs yourself.
@@ -89,11 +89,11 @@ func (c *OpenAIClient) MergeChatHistoriesRecaps(ctx context.Context, recaps []st
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: ChatHistoriesRecapMergeSystemPrompt,
+			Content: c.recapSystemPrompt(ChatHistoriesRecapMergeSystemPrompt),
 		},
 		{
 			Role:    openai.ChatMessageRoleUser,
-			Content: sb.String(),
+			Content: sb.String() + recapFactCheckUserInstruction,
 		},
 	}
 

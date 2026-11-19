@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/pkoukk/tiktoken-go"
@@ -55,6 +56,7 @@ type OpenAIClient struct {
 	forceCheckModelFailure              bool
 	enableVerbosePayloadLogs            bool
 	defaultSummarizationLanguage        string
+	recapTimezoneOffsetSeconds          int
 	mediaModelName                      string
 	// mediaLimiter keeps a burst of media messages from taking the shared
 	// limiter's slots away from recap and summarization calls.
@@ -140,6 +142,7 @@ func NewClient(enableMetricRecordForTokens bool) func(NewClientParams) (Client, 
 			forceCheckModelFailure:              params.Config.OpenAI.ForceCheckModelFailure,
 			enableVerbosePayloadLogs:            params.Config.OpenAI.EnableVerbosePayloadLogs,
 			defaultSummarizationLanguage:        lo.Ternary(params.Config.OpenAI.ChatHistoriesSummarizationLanguage == "", "Simplified Chinese", params.Config.OpenAI.ChatHistoriesSummarizationLanguage),
+			recapTimezoneOffsetSeconds:          int(params.Config.TimezoneShiftSeconds),
 			mediaModelName:                      lo.Ternary(params.Config.MediaUnderstanding.ModelName == "", primaryModel, params.Config.MediaUnderstanding.ModelName),
 			mediaLimiter:                        ratelimit.New(2),
 			client:                              client,
@@ -868,6 +871,13 @@ func (c *OpenAIClient) SummarizeAny(ctx context.Context, content string) (*opena
 	return &resp, nil
 }
 
+func (c *OpenAIClient) recapSystemPrompt(prompt string) string {
+	location := time.FixedZone("", c.recapTimezoneOffsetSeconds)
+	year := time.Now().In(location).Year()
+
+	return fmt.Sprintf("%s\n\nCurrent year: %d.\n\n%s", prompt, year, recapFactCheckSystemInstructions)
+}
+
 func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyChatHistories string, language string) (*openai.ChatCompletionResponse, error) {
 	trace := recapExecutionTraceFromContext(ctx)
 	if trace != nil {
@@ -895,11 +905,11 @@ func (c *OpenAIClient) SummarizeChatHistories(ctx context.Context, llmFriendlyCh
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: ChatHistorySummarizationSystemPrompt,
+			Content: c.recapSystemPrompt(ChatHistorySummarizationSystemPrompt),
 		},
 		{
 			Role:    openai.ChatMessageRoleUser,
-			Content: sb.String(),
+			Content: sb.String() + recapFactCheckUserInstruction,
 		},
 	}
 
@@ -1122,11 +1132,11 @@ func (c *OpenAIClient) SarcasticCondense(ctx context.Context, chatHistory string
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: SarcasticCondensedSystemPrompt,
+			Content: c.recapSystemPrompt(SarcasticCondensedSystemPrompt),
 		},
 		{
 			Role:    openai.ChatMessageRoleUser,
-			Content: userPrompt.String(),
+			Content: userPrompt.String() + recapFactCheckUserInstruction,
 		},
 	}
 
